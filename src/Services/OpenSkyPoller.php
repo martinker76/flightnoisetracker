@@ -215,7 +215,7 @@ class OpenSkyPoller
             $now = gmdate('Y-m-d H:i:s');
             $capturedAt = gmdate('Y-m-d H:i:s.') . sprintf('%03d', (int)(microtime(true) * 1000) % 1000);
 
-            // Check if this aircraft already has an active flight (seen within last 24h)
+            // Check if this aircraft already has an active flight (seen within last 60 min)
             $existingFlight = $this->findActiveFlight($icao24);
 
             if ($existingFlight === null) {
