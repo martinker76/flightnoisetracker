@@ -365,7 +365,17 @@ Errors:
 - Lazy-loaded route at `/about` (separate chunk, ~2.7 kB gzipped)
 - Content: purpose, data sources, bounding box rationale (~55 dBA audibility), reference point (Mannersdorfer Schloss), runway classification method, noise tracking, statistics, technical notes
 
-### 9.6 Navigation
+### 9.6 Tooltip Icons
+
+Reusable `TooltipIcon` component renders a small gray question-mark (`?`) circle next to any label. On hover (desktop) or tap (mobile), it displays a short explanation in a positioned tooltip box.
+
+**Where used:**
+- **Dashboard** — all 4 summary cards (Today's Flights, VIE-Related, Runway 11/29, Overflights), all 6 table headers (Callsign, Enter, Leave, Runway, Alt, Closest), and all 3 period cards (This Week, This Month, All Time)
+- **Statistics page** — section headers (Trend, Runway Usage by Day, Hourly Breakdown) and key-number cards (Total Flights, Avg/Day, Most Active Hour, Most Used Runway)
+
+Implementation: `ui/src/components/TooltipIcon.tsx` — Tailwind CSS hover classes, dark-mode compatible, max-width wrapping on small screens.
+
+### 9.7 Navigation
 - Navbar with links: Dashboard, Map, Flights, Noise, Statistics, About
 - Responsive: desktop horizontal bar, mobile hamburger menu
 - Active route highlighting
@@ -494,6 +504,7 @@ handle_path /flightnoisetracker* {
 - Env vars **must** be set at build time: `VITE_BASE_URL=/flightnoisetracker` `VITE_API_BASE=/flightnoisetracker/api`
 - `emptyOutDir: false` in `vite.config.ts` — preserves PHP files (`index.php`, `.htaccess`) in `public/` across rebuilds
 - After build, ensure `public/index.php` and `.htaccess` are still present (git-restore if wiped)
+- `ui/index.html` sets Cache-Control no-cache meta tags to prevent stale HTML from caching old JS chunk references
 
 ## 13. Implementation Status
 
@@ -511,6 +522,8 @@ handle_path /flightnoisetracker* {
 | — | **QA fixes (8 issues)** | ✅ Done & re-reviewed |
 | — | **OpenSky OAuth2 migration** | ✅ Done |
 | — | **Boundary box audibility refinement** | ✅ Done |
+| — | **Tooltip icons on Dashboard & Stats** | ✅ Done |
+| — | **Cache-control meta tags (stale cache fix)** | ✅ Done |
 
 ## 14. Data Retention & Privacy
 
