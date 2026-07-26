@@ -3,9 +3,17 @@
  */
 interface Props {
   text: string;
+  position?: 'center' | 'left' | 'right';
 }
 
-export function TooltipIcon({ text }: Props) {
+export function TooltipIcon({ text, position = 'center' }: Props) {
+  const positionClass =
+    position === 'left'
+      ? 'left-0'
+      : position === 'right'
+      ? 'right-0'
+      : 'left-1/2 -translate-x-1/2';
+
   return (
     <span className="relative group inline-flex items-center cursor-help">
       <span className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full
@@ -14,7 +22,7 @@ export function TooltipIcon({ text }: Props) {
         text-[10px] font-bold leading-none select-none">
         ?
       </span>
-      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2
+      <span className={`absolute bottom-full ${positionClass} mb-2
         px-2.5 py-1.5 rounded-md
         text-xs leading-tight text-white
         bg-gray-800 dark:bg-gray-900
@@ -23,7 +31,7 @@ export function TooltipIcon({ text }: Props) {
         transition-opacity duration-150
         whitespace-nowrap z-20
         pointer-events-none
-        max-w-[260px] sm:max-w-none">
+        max-w-[260px] sm:max-w-none`}>
         {text}
       </span>
     </span>

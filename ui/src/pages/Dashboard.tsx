@@ -76,7 +76,7 @@ export default function Dashboard() {
                   <tr className="border-b border-slate-200 dark:border-slate-700">
                     <th className="text-left py-2 px-2 text-slate-500">
                       <span className="inline-flex items-center gap-0.5">
-                        Callsign <TooltipIcon text={TOOLTIPS.callsign} />
+                        Callsign <TooltipIcon text={TOOLTIPS.callsign} position="left" />
                       </span>
                     </th>
                     <th className="text-left py-2 px-2 text-slate-500">

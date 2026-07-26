@@ -1,6 +1,6 @@
 # FlightNoiseTracker — Specification
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Status:** Live  
 **Repository:** `https://github.com/martinker76/flightnoisetracker`  
 **Live URL:** `https://openclaw.kersch.at/flightnoisetracker/`
@@ -144,6 +144,19 @@ Manual entry only for v1. Users record a dB level at a given time, optionally co
 ## 6. Database Schema
 
 ```sql
+-- Cached flight tracks fetched from OpenSky /tracks/all
+CREATE TABLE flight_tracks (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    flight_id BIGINT UNSIGNED NOT NULL,
+    icao24 CHAR(6) NOT NULL,
+    track_data JSON NOT NULL,              -- raw GeoJSON track from OpenSky
+    fetched_at DATETIME NOT NULL,
+    source ENUM('opensky-tracks') NOT NULL DEFAULT 'opensky-tracks',
+    INDEX idx_flight (flight_id),
+    INDEX idx_icao24 (icao24),
+    FOREIGN KEY (flight_id) REFERENCES flights(id) ON DELETE CASCADE
+) ENGINE=InnoDB CHARSET=utf8mb4;
+
 -- Core flight records (one per unique flight through the box)
 CREATE TABLE flights (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -355,6 +368,7 @@ Errors:
   - Track on Leaflet map
   - Altitude profile chart (altitude over time)
   - Raw data table of position samples
+- Track is fetched from OpenSky when stored positions are insufficient, providing a complete flight path through the region
 
 ### 9.4 Noise Log
 - Simple form: date/time, dB level, optional notes, optional correlation with flight
@@ -369,9 +383,14 @@ Errors:
 
 Reusable `TooltipIcon` component renders a small gray question-mark (`?`) circle next to any label. On hover (desktop) or tap (mobile), it displays a short explanation in a positioned tooltip box.
 
+**Props:**
+- `text` (required): tooltip explanation text
+- `position` (optional): `'center' | 'left' | 'right'` — controls horizontal positioning of the tooltip box. Defaults to `'center'`. `'left'` positioning is used in the Dashboard "Recent Flights" Callsign header to prevent the tooltip from being clipped by the adjacent map.
+
 **Where used:**
 - **Dashboard** — all 4 summary cards (Today's Flights, VIE-Related, Runway 11/29, Overflights), all 6 table headers (Callsign, Enter, Leave, Runway, Alt, Closest), and all 3 period cards (This Week, This Month, All Time)
 - **Statistics page** — section headers (Trend, Runway Usage by Day, Hourly Breakdown) and key-number cards (Total Flights, Avg/Day, Most Active Hour, Most Used Runway)
+- **RunwayChart** — "Runway Distribution" heading: *"Distribution of flights by runway configuration for today"*
 
 Implementation: `ui/src/components/TooltipIcon.tsx` — Tailwind CSS hover classes, dark-mode compatible, max-width wrapping on small screens.
 
@@ -379,6 +398,23 @@ Implementation: `ui/src/components/TooltipIcon.tsx` — Tailwind CSS hover class
 - Navbar with links: Dashboard, Map, Flights, Noise, Statistics, About
 - Responsive: desktop horizontal bar, mobile hamburger menu
 - Active route highlighting
+
+### 9.8 Flight Track Visualization
+
+The Flight Detail page fetches full flight tracks from the OpenSky `/tracks/all` API (OAuth2) when stored position data is insufficient (< 2 points in `flight_positions`). A new `FlightTrackService` handles fetching and caching tracks in the `flight_tracks` table to avoid repeated API calls.
+
+**Flow:**
+1. Flight Detail page requests the track GeoJSON endpoint (`/api/flights/{id}/track`)
+2. Server checks `flight_positions` count for the flight
+3. If < 2 positions, `FlightTrackService` queries `flight_tracks` table for a cached track
+4. If not cached, fetches from OpenSky `GET /tracks/all?icao24=X&time=T` (4 credits) and stores in `flight_tracks`
+5. Track data is merged into the GeoJSON response
+
+**Map rendering:**
+- Altitude-colored track segments (gradient from low to high altitude)
+- Start and end markers (green = start, red = end)
+- Mannersdorf center reference point marker
+- Bounding box overlay
 
 ## 10. Polling Implementation
 
@@ -524,6 +560,9 @@ handle_path /flightnoisetracker* {
 | — | **Boundary box audibility refinement** | ✅ Done |
 | — | **Tooltip icons on Dashboard & Stats** | ✅ Done |
 | — | **Cache-control meta tags (stale cache fix)** | ✅ Done |
+| — | **Track Visualization on Flight Detail** | ✅ Done |
+| — | **Runway Distribution Tooltip** | ✅ Done |
+| — | **Callsign Tooltip Positioning Fix** | ✅ Done |
 
 ## 14. Data Retention & Privacy
 

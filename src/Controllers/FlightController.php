@@ -6,6 +6,8 @@ namespace App\Controllers;
 
 use App\Models\Flight;
 use App\Models\FlightPosition;
+use App\Services\FlightTrackService;
+use App\Services\OpenSkyAuth;
 
 /**
  * Handles flight listing, detail, and track endpoints.
@@ -103,7 +105,60 @@ class FlightController
             return;
         }
 
+        $positions = $this->positionModel->findByFlightId($id);
         $geoJson = $this->positionModel->toGeoJson($id, $flight);
+
+        // If stored positions are insufficient (< 2 points), try fetching from OpenSky
+        if (count($positions) < 2) {
+            try {
+                $trackService = new FlightTrackService(
+                    \App\Config\Database::getConnection(),
+                    new OpenSkyAuth($this->config['opensky'])
+                );
+                $track = $trackService->getTrack($id, $flight['icao24'], $flight['first_seen'], $flight['last_seen']);
+
+                if ($track !== null) {
+                    // Build a GeoJSON from the fetched track
+                    $coordinates = [];
+                    $timestamps = [];
+                    foreach ($track['path'] as $wp) {
+                        if (count($wp) >= 4) {
+                            // OpenSky track path: [timestamp, lat, lon, altitude, ...]
+                            $coordinates[] = [(float)$wp[2], (float)$wp[1], isset($wp[3]) ? (int)$wp[3] : null];
+                            $timestamps[] = gmdate('Y-m-d H:i:s', (int)$wp[0]);
+                        }
+                    }
+
+                    if (count($coordinates) >= 2) {
+                        $geoJson = [
+                            'type' => 'FeatureCollection',
+                            'features' => [[
+                                'type' => 'Feature',
+                                'properties' => [
+                                    'flight_id' => $id,
+                                    'icao24' => $flight['icao24'],
+                                    'callsign' => $flight['callsign'],
+                                    'runway_used' => $flight['runway_used'],
+                                    'is_vie_related' => (bool)$flight['is_vie_related'],
+                                    'first_seen' => $flight['first_seen'],
+                                    'last_seen' => $flight['last_seen'],
+                                    'position_count' => count($coordinates),
+                                    'source' => 'opensky-track-api',
+                                ],
+                                'geometry' => [
+                                    'type' => 'LineString',
+                                    'coordinates' => $coordinates,
+                                ],
+                                'timestamps' => $timestamps,
+                            ]],
+                        ];
+                    }
+                }
+            } catch (\Throwable $e) {
+                // Log error but don't fail — just fall back to stored positions
+                error_log("FlightTrackService error for flight {$id}: {$e->getMessage()}");
+            }
+        }
 
         $this->sendJson($geoJson);
     }

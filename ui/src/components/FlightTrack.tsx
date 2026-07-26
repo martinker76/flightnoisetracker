@@ -1,9 +1,24 @@
 import { useEffect, useMemo } from 'react';
-import { MapContainer, TileLayer, Polyline, CircleMarker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, CircleMarker, Rectangle, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import type { Flight } from '../types';
 
 const LOWW: [number, number] = [48.1103, 16.5697];
+const MANNERSDORF: [number, number] = [47.974, 16.604];
+const BOUNDS: L.LatLngBoundsExpression = [
+  [47.947, 16.570],
+  [48.001, 16.638],
+];
+
+// Fix default icon paths
+if (typeof window !== 'undefined') {
+  delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl;
+  L.Icon.Default.mergeOptions({
+    iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  });
+}
 
 const airportIcon = L.divIcon({
   html: '✈️',
@@ -106,6 +121,23 @@ export function FlightTrack({ flight, track, height = '500px' }: Props) {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+
+        {/* Mannersdorf bounding box */}
+        <Rectangle
+          bounds={BOUNDS}
+          pathOptions={{
+            color: '#3b82f6',
+            fillColor: '#3b82f6',
+            fillOpacity: 0.08,
+            weight: 2,
+            dashArray: '5,5',
+          }}
+        />
+
+        {/* Mannersdorf center marker */}
+        <Marker position={MANNERSDORF}>
+          <Popup>Mannersdorf am Leithagebirge</Popup>
+        </Marker>
 
         {/* Track segments colored by altitude */}
         {segments.map((seg, i) => (

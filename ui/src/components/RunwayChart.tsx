@@ -1,5 +1,6 @@
 import { Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
+import { TooltipIcon } from '../components/TooltipIcon';
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
@@ -32,7 +33,11 @@ export function RunwayChart({ runway_11_29, runway_16_34, runway_unknown }: Prop
 
   return (
     <div className="card">
-      <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Runway Distribution</h3>
+      <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
+        <span className="inline-flex items-center gap-1">
+          Runway Distribution <TooltipIcon text="Distribution of flights by runway configuration for today" />
+        </span>
+      </h3>
       <div className="h-56">
         <Doughnut data={data} options={options} />
       </div>
