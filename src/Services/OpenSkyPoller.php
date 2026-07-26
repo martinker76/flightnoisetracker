@@ -203,7 +203,9 @@ class OpenSkyPoller
                 'on_ground' => (bool)($raw[8] ?? false),
                 'velocity' => isset($raw[9]) ? (float)$raw[9] : null, // m/s
                 'heading' => isset($raw[10]) ? (float)$raw[10] : null, // degrees
+                'heading_deg' => isset($raw[10]) ? (float)$raw[10] : null, // degrees (alias for classifier)
                 'vertical_rate' => isset($raw[11]) ? (float)$raw[11] : null, // m/s
+                'vertical_rate_mps' => isset($raw[11]) ? (float)$raw[11] : null, // m/s (alias for classifier)
                 'geo_altitude' => isset($raw[13]) ? (int)round((float)$raw[13]) : null,
             ];
         }

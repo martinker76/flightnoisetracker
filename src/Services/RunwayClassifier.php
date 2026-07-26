@@ -57,7 +57,7 @@ class RunwayClassifier
         foreach ($positions as $pos) {
             $lat = (float)$pos['lat'];
             $lon = (float)$pos['lon'];
-            $alt = $pos['altitude_m'] !== null ? (int)$pos['altitude_m'] : null;
+            $alt = isset($pos['altitude_m']) && $pos['altitude_m'] !== null ? (int)$pos['altitude_m'] : null;
 
             $distance = $this->haversineDistance($lat, $lon, $this->airportLat, $this->airportLon);
 
@@ -67,7 +67,12 @@ class RunwayClassifier
             }
 
             // Prefer lower altitude positions (closer to approach/departure)
-            if ($alt !== null && $alt < $bestAltitude) {
+            // Skip positions with null altitude
+            if ($alt === null) {
+                continue;
+            }
+
+            if ($alt < $bestAltitude) {
                 $bestAltitude = $alt;
                 $bestDistance = $distance;
                 $bestPosition = $pos;
@@ -89,9 +94,9 @@ class RunwayClassifier
             ];
         }
 
-        $heading = $bestPosition['heading_deg'] !== null ? (float)$bestPosition['heading_deg'] : null;
-        $altitude = $bestPosition['altitude_m'] !== null ? (int)$bestPosition['altitude_m'] : null;
-        $verticalRate = $bestPosition['vertical_rate_mps'] ?? null;
+        $heading = isset($bestPosition['heading_deg']) && $bestPosition['heading_deg'] !== null ? (float)$bestPosition['heading_deg'] : null;
+        $altitude = isset($bestPosition['altitude_m']) && $bestPosition['altitude_m'] !== null ? (int)$bestPosition['altitude_m'] : null;
+        $verticalRate = isset($bestPosition['vertical_rate_mps']) && $bestPosition['vertical_rate_mps'] !== null ? (float)$bestPosition['vertical_rate_mps'] : null;
 
         // Step 2: Determine if flight is VIE-related (within 50km and below 6000m)
         $isVieRelated = $altitude !== null && $altitude <= $this->classifyMaxAltM;
@@ -240,7 +245,7 @@ class RunwayClassifier
         foreach ($positions as $pos) {
             $lat = (float)$pos['lat'];
             $lon = (float)$pos['lon'];
-            $alt = $pos['altitude_m'] !== null ? (int)$pos['altitude_m'] : null;
+            $alt = isset($pos['altitude_m']) && $pos['altitude_m'] !== null ? (int)$pos['altitude_m'] : null;
 
             $distance = $this->haversineDistance($lat, $lon, $this->airportLat, $this->airportLon);
 
