@@ -16,10 +16,15 @@ const queryClient = new QueryClient({
   },
 });
 
+// Router basename — set VITE_BASE_URL at build time for subpath deployments.
+// e.g. VITE_BASE_URL=/flightnoisetracker for openclaw.kersch.at/flightnoisetracker
+// Falls back to empty string (root) for dedicated-domain deployments.
+const routerBasename = import.meta.env.VITE_BASE_URL ?? '';
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <BrowserRouter basename={routerBasename}>
         <App />
       </BrowserRouter>
     </QueryClientProvider>
