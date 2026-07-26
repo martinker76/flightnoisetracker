@@ -23,6 +23,10 @@ return [
         'password' => null,
     ],
     'adsbexchange_api_key' => null,
+
+    // When deployed under a subpath (e.g., /flightnoisetracker),
+    // set this so the PHP router strips the prefix from REQUEST_URI
+    'base_path' => getenv('FNT_BASE_PATH') ?: '/',
     'db' => [
         'host' => getenv('FNT_DB_HOST') ?: 'localhost',
         'port' => (int)(getenv('FNT_DB_PORT') ?: 3306),

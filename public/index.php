@@ -28,6 +28,20 @@ date_default_timezone_set('UTC');
 $method = $_SERVER['REQUEST_METHOD'];
 $uri = $_SERVER['REQUEST_URI'];
 
+// Support subpath deployments (e.g., /flightnoisetracker/api/health → /api/health)
+// Caddy's handle_path strips the prefix for SCRIPT_NAME/SERVER_FILENAME
+// but preserves the full path in REQUEST_URI. Strip it here when configured.
+$basePath = $config['base_path'] ?? '/';
+if ($basePath !== '/') {
+    $uriPath = parse_url($uri, PHP_URL_PATH);
+    $normalizedBase = rtrim($basePath, '/');
+    if (str_starts_with((string)$uriPath, $normalizedBase)) {
+        $stripped = substr($uriPath, strlen($normalizedBase));
+        $qs = str_contains($uri, '?') ? parse_url($uri, PHP_URL_QUERY) : null;
+        $uri = ($stripped ?: '/') . ($qs !== null ? '?' . $qs : '');
+    }
+}
+
 // Initialize the router
 $router = new App\Router();
 

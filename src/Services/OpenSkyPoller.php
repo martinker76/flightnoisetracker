@@ -135,8 +135,13 @@ class OpenSkyPoller
         }
 
         $data = json_decode($response, true);
-        if (!is_array($data) || !isset($data['states'])) {
+        if (!is_array($data) || !array_key_exists('states', $data)) {
             throw new \RuntimeException('Invalid OpenSky API response format');
+        }
+
+        // `null` states means no aircraft in the bounding box
+        if ($data['states'] === null) {
+            return [];
         }
 
         return $this->parseStates($data['states']);
