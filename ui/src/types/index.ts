@@ -13,6 +13,8 @@ export interface Flight {
   created_at: string;
   updated_at: string;
   closest_distance_km?: number | null;
+  aircraft_type?: string | null;
+  estimated_db?: number | null;
 }
 
 export interface FlightPosition {
@@ -133,4 +135,21 @@ export interface NoiseCreatePayload {
   latitude?: number | null;
   longitude?: number | null;
   notes?: string | null;
+}
+
+export interface AircraftTypeRow {
+  aircraft_type: string;
+  count: number;
+}
+
+export interface NoiseStats {
+  min_db: number | null;
+  max_db: number | null;
+  avg_db: number | null;
+  flights_with_noise: number;
+  bucket_under_45: number;
+  bucket_45_50: number;
+  bucket_50_55: number;
+  bucket_55_60: number;
+  bucket_60_plus: number;
 }

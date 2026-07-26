@@ -177,6 +177,52 @@ export default function About() {
       </section>
 
       <section className="card space-y-3">
+        <h2 className="text-lg font-semibold">Estimated Noise Levels</h2>
+        <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
+          Each flight now includes an <strong>estimated peak noise level</strong> (in dBA)
+          calculated at the Mannersdorf town center. This uses a geometric spreading model
+          based on the aircraft's closest slant distance (ground distance + altitude).
+        </p>
+        <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-4 font-mono text-sm">
+          L<sub>est</sub> = L<sub>ref</sub> - 20 &times; log<sub>10</sub>(d<sub>slant</sub> / d<sub>ref</sub>)
+        </div>
+        <ul className="list-disc list-inside text-slate-700 dark:text-slate-300 space-y-1">
+          <li><strong>Reference level (L<sub>ref</sub>)</strong>: 80 dBA at 300 m slant distance</li>
+          <li><strong>d<sub>slant</sub></strong>: &radic;(distance&sup2; + altitude&sup2;) from Mannersdorf center</li>
+          <li><strong>Range</strong>: clamped to 0&ndash;95 dBA</li>
+        </ul>
+        <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
+          <strong>Caveats:</strong> This is a simplified geometric model and does <em>not</em> account
+          for aircraft type-specific noise profiles, engine thrust settings, atmospheric absorption,
+          ground reflection, or wind effects. Actual noise levels at ground level may differ significantly.
+          The estimates are useful for relative comparisons between flights but should not be treated
+          as calibrated measurements.
+        </p>
+      </section>
+
+      <section className="card space-y-3">
+        <h2 className="text-lg font-semibold">Aircraft Type Resolution</h2>
+        <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
+          Aircraft types are resolved from the{' '}
+          <a
+            href="https://adsb.lol"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            ADSB.lol
+          </a>{' '}
+          public API using the aircraft's ICAO 24-bit transponder address (icao24). Each new flight
+          triggers a lookup to resolve the ICAO type code (e.g., B738 for Boeing 737-800, A320 for
+          Airbus A320). Results are cached per polling cycle to minimize API calls.
+        </p>
+        <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
+          The type distribution is shown on the Statistics page, giving insight into what kinds of
+          aircraft typically overfly Mannersdorf.
+        </p>
+      </section>
+
+      <section className="card space-y-3">
         <h2 className="text-lg font-semibold">Statistics &amp; Trends</h2>
         <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
           The{' '}

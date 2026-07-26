@@ -42,6 +42,10 @@ export default function FlightDetail() {
             <p className="font-medium">{f.callsign || '—'}</p>
           </div>
           <div>
+            <p className="text-xs text-slate-500">Aircraft Type</p>
+            <p className="font-mono">{f.aircraft_type || '—'}</p>
+          </div>
+          <div>
             <p className="text-xs text-slate-500">Origin Country</p>
             <p>{f.origin_country || '—'}</p>
           </div>
@@ -85,6 +89,10 @@ export default function FlightDetail() {
           <div>
             <p className="text-xs text-slate-500">Closest Point to Mannersdorf</p>
             <p className="font-medium">{f.closest_distance_km != null ? `${Number(f.closest_distance_km).toFixed(2)} km` : '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-slate-500">Est. Noise</p>
+            <p className="font-medium">{f.estimated_db != null ? `${Number(f.estimated_db).toFixed(1)} dBA` : '—'}</p>
           </div>
         </div>
       </div>

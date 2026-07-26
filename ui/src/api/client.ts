@@ -51,6 +51,10 @@ export const api = {
       request<import('../types').ApiResponse<import('../types').HourlyItem[]>>(
         `/stats/hourly${qs({ date })}`
       ),
+    aircraft: () =>
+      request<import('../types').ApiResponse<import('../types').AircraftTypeRow[]>>('/stats/aircraft'),
+    noise: () =>
+      request<import('../types').ApiResponse<import('../types').NoiseStats>>('/stats/noise'),
   },
   noise: {
     list: (params: NoiseParams = {}) =>

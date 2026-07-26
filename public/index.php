@@ -59,6 +59,8 @@ $router->get('/api/stats/summary', [App\Controllers\StatsController::class, 'sum
 $router->get('/api/stats/runways', [App\Controllers\StatsController::class, 'runways']);
 $router->get('/api/stats/hourly', [App\Controllers\StatsController::class, 'hourly']);
 $router->get('/api/stats/trend', [App\Controllers\StatsController::class, 'trend']);
+$router->get('/api/stats/aircraft', [App\Controllers\StatsController::class, 'aircraft']);
+$router->get('/api/stats/noise', [App\Controllers\StatsController::class, 'noise']);
 
 // Noise
 $router->get('/api/noise', [App\Controllers\NoiseController::class, 'index']);

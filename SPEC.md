@@ -1,6 +1,6 @@
 # FlightNoiseTracker — Specification
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Status:** Live  
 **Repository:** `https://github.com/martinker76/flightnoisetracker`  
 **Live URL:** `https://openclaw.kersch.at/flightnoisetracker/`
@@ -172,8 +172,9 @@ CREATE TABLE flights (
     runway_used ENUM('11/29','16/34','UNKNOWN') DEFAULT 'UNKNOWN',
     runway_confidence DECIMAL(3,2),      -- 0.00–1.00 confidence score
     operator VARCHAR(128),
-    aircraft_type VARCHAR(32),
+    aircraft_type VARCHAR(8) DEFAULT NULL,  -- ICAO aircraft type code (e.g., B738, A320)
     registration VARCHAR(16),
+    estimated_db DECIMAL(5,1) DEFAULT NULL, -- estimated peak noise at Mannersdorf center
     INDEX idx_icao24 (icao24),
     INDEX idx_first_seen (first_seen),
     INDEX idx_vie_related (is_vie_related),
@@ -347,7 +348,7 @@ Errors:
 
 ### 9.1 Dashboard (default landing page)
 - Summary cards: total flights today/this week, VIE-related count, runway breakdown
-- Recent flights table with inline pagination (Callsign, Enter, Leave, Altitude, Closest, Runway)
+- Recent flights table with inline pagination (Callsign, Aircraft, Enter, Runway, Alt, Est. dB) — compact layout
 - **Daily trend chart** (the core feature): flights over Mannersdorf per day, broken into runway 11/29, runway 16/34, overflights, stacked bar chart
 - **Hourly chart** for a selected day: flights per hour, colored by runway
 
@@ -365,6 +366,8 @@ Errors:
   - **Entering Airspace** / **Leaving Airspace** timestamps
   - **Duration Over Airspace** (h/m/s)
   - **Closest Point to Mannersdorf** (km)
+  - **Aircraft Type** (ICAO type code, displayed next to callsign)
+  - **Estimated Noise** (Est. dB — estimated peak noise at Mannersdorf center)
   - Track on Leaflet map
   - Altitude profile chart (altitude over time)
   - Raw data table of position samples
@@ -378,6 +381,9 @@ Errors:
 ### 9.5 About Page
 - Lazy-loaded route at `/about` (separate chunk, ~2.7 kB gzipped)
 - Content: purpose, data sources, bounding box rationale (~55 dBA audibility), reference point (Mannersdorfer Schloss), runway classification method, noise tracking, statistics, technical notes
+- **Noise Estimation Explanation:** How the geometric model works (formula, reference values L_ref=80 dBA at d_ref=300 m, assumptions), why it provides consistent relative comparison rather than calibrated measurement
+- **Aircraft Type Resolution:** How ICAO type codes are fetched from the OpenSky aircraft metadata database
+- **Future Improvements:** Per-type reference levels, atmospheric attenuation, ground reflection modeling
 
 ### 9.6 Tooltip Icons
 
@@ -415,6 +421,87 @@ The Flight Detail page fetches full flight tracks from the OpenSky `/tracks/all`
 - Start and end markers (green = start, red = end)
 - Mannersdorf center reference point marker
 - Bounding box overlay
+
+### 9.9 Noise Estimation Model
+
+The system calculates an estimated peak A-weighted sound level (L_Amax) at Mannersdorf center for each flight using a simple geometric spreading model.
+
+**Formula:**
+
+```
+L_est = L_ref − 20 × log₁₀(d_slant / d_ref)
+```
+
+**Parameters:**
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| L_ref | 80 dBA | Reference level — generic jet on approach, gear down, approach thrust |
+| d_ref | 300 m | Reference distance |
+| d_slant | √(d_horiz² + alt²) | Slant distance in km |
+
+**Slant distance calculation:**
+- `d_horiz` = closest horizontal distance from flight's closest position to Mannersdorf center (47.974°N, 16.604°E), in km
+- `alt` = altitude_m / 1000 (meters → km)
+
+**Constraints:**
+- **Clamping:** capped at 95 dBA maximum, minimum 0 dBA
+- **Precision:** one decimal place, stored as `DECIMAL(5,1)` in DB
+- **Displayed as:** "Est. dB" column with tooltip explaining the model and its limitations
+
+**Important caveats (documented on About page):**
+- No engine power/thrust data
+- No atmospheric attenuation
+- No ground reflection
+- No aircraft-type differentiation
+- Single-point estimate using closest approach only
+- Provides consistent relative comparison rather than calibrated measurement
+
+### 9.10 Aircraft Type Resolution
+
+Each flight stores an ICAO aircraft type code (e.g., B738, A320, B772) fetched from the ADSB.lol public API.
+
+**Lookup process:**
+1. During flight processing in the poller, the ICAO24 is used to query ADSB.lol
+2. **URL:** `https://api.adsb.lol/v2/icao/{icao24}`
+3. **Auth:** None required (public API)
+4. **Response:** JSON with `ac[].t` field containing ICAO aircraft type code (e.g. `"BCS3"` for A220-300, `"B738"` for 737-800)
+5. **Fallback:** `null` if lookup fails (displayed as "—" in UI)
+
+**Display:**
+- Shown as "Aircraft" column in flight tables (font-mono styling)
+- Tooltip explains the lookup source (ADSB.lol)
+
+### 9.11 Dashboard "Recent Flights" Table Redesign
+
+The Dashboard "Recent Flights" table is redesigned for a more compact and informative layout.
+
+**Removed columns:**
+- **"Leave" (Leaving Airspace):** Flights cross the small bounding box in ~1 minute, so enter/leave timestamps are functionally identical with the current 60-second polling resolution
+- **"Closest":** Moved to the Flight Detail page only
+
+**Added columns:**
+- **"Aircraft":** ICAO aircraft type code (font-mono), with tooltip explaining lookup source
+- **"Est. dB":** Estimated peak noise at Mannersdorf center, with tooltip explaining the geometric model
+
+**Compact column order:** Callsign → Aircraft → Enter → Runway → Alt → Est. dB
+
+### 9.12 Stats Page Additions
+
+Three new sections added to the Statistics page:
+
+1. **Aircraft Type Distribution:** Bar chart showing top aircraft types by flight frequency, with tooltip explaining the data source
+2. **Noise Level Statistics:** Summary card showing min/max/avg estimated dB values across all flights, with tooltip explaining the estimation model
+3. **Noise Distribution:** Bar chart (histogram) showing estimated dB range buckets: <45, 45–50, 50–55, 55–60, 60+ dBA, with tooltip
+
+### 9.13 About Page Updates
+
+New sections added to the About page:
+
+- **Noise Estimation:** Explanation of the geometric spreading model — formula (`L_est = L_ref − 20 × log₁₀(d_slant / d_ref)`), reference values (L_ref = 80 dBA at d_ref = 300 m), and all assumptions/caveats
+- **Aircraft Type Resolution:** How ICAO type codes are fetched from the OpenSky aircraft metadata database, fallback behavior
+- **Calibration Disclaimer:** Why this provides a consistent relative comparison across flights, not a calibrated absolute measurement
+- **Future Improvements:** Planned enhancements — per-type reference levels (different L_ref for A320 vs B77W vs turboprop), atmospheric attenuation modeling, ground reflection corrections
 
 ## 10. Polling Implementation
 
@@ -563,6 +650,11 @@ handle_path /flightnoisetracker* {
 | — | **Track Visualization on Flight Detail** | ✅ Done |
 | — | **Runway Distribution Tooltip** | ✅ Done |
 | — | **Callsign Tooltip Positioning Fix** | ✅ Done |
+| — | Aircraft type resolution (OpenSky metadata) | ❌ Not yet implemented |
+| — | Noise estimation (geometric model) | ❌ Not yet implemented |
+| — | Dashboard table redesign (remove Leave, add Aircraft/Est. dB) | ❌ Not yet implemented |
+| — | Stats page aircraft/noise cards | ❌ Not yet implemented |
+| — | About page noise/aircraft explanation | ❌ Not yet implemented |
 
 ## 14. Data Retention & Privacy
 

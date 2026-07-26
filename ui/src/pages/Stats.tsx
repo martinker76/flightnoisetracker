@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useStatsSummary, useStatsTrend, useStatsRunways, useStatsHourly } from '../hooks/useApi';
+import { useStatsSummary, useStatsTrend, useStatsRunways, useStatsHourly, useAircraftTypes, useNoiseStats } from '../hooks/useApi';
 import { StatsCard } from '../components/StatsCard';
 import { TrendChart } from '../components/TrendChart';
 import { RunwayChart } from '../components/RunwayChart';
@@ -20,6 +20,9 @@ const TOOLTIPS = {
   hourly: 'Flight activity distributed by hour of the day for the selected date',
   avgDay: 'Estimated average flights per day — total flights divided by the number of days tracked',
   mostActive: 'The hour of day with the highest volume of flights crossing the Mannersdorf area',
+  avgNoise: 'Average estimated peak noise level across all tracked flights (geometric model, not calibrated)',
+  minMaxNoise: 'Minimum and maximum estimated noise levels observed',
+  noiseDataCount: 'Total flights for which noise estimation was calculated',
 };
 
 export default function Stats() {
@@ -32,6 +35,8 @@ export default function Stats() {
   const trend = useStatsTrend(trendDays);
   const runways = useStatsRunways(dateFrom, dateTo);
   const hourly = useStatsHourly(hourlyDate);
+  const aircraftTypes = useAircraftTypes();
+  const noiseStats = useNoiseStats();
 
   if (summary.isLoading) return <LoadingSpinner />;
   if (summary.isError) return <ErrorAlert error={summary.error} onRetry={() => summary.refetch()} />;
@@ -139,6 +144,87 @@ export default function Stats() {
             />
           )}
         </div>
+      </div>
+
+      {/* Noise Level Statistics */}
+      {noiseStats.data?.data && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <StatsCard label="Avg. Noise Level" value={noiseStats.data.data.avg_db != null ? `${Number(noiseStats.data.data.avg_db).toFixed(1)} dBA` : '—'} icon="🔊" color="blue" tooltip={TOOLTIPS.avgNoise} />
+          <StatsCard label="Min/Max Noise" value={noiseStats.data.data.min_db != null && noiseStats.data.data.max_db != null ? `${Number(noiseStats.data.data.min_db).toFixed(1)} / ${Number(noiseStats.data.data.max_db).toFixed(1)} dBA` : '—'} icon="📊" color="yellow" tooltip={TOOLTIPS.minMaxNoise} />
+          <StatsCard label="Flights w/ Noise Data" value={noiseStats.data.data.flights_with_noise} icon="✈️" color="green" tooltip={TOOLTIPS.noiseDataCount} />
+        </div>
+      )}
+
+      {/* Noise Distribution */}
+      {noiseStats.data?.data && (
+        <div className="card">
+          <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
+            <span className="inline-flex items-center gap-1">
+              Noise Distribution <TooltipIcon text="Distribution of estimated noise levels across all tracked flights" />
+            </span>
+          </h3>
+          <div className="space-y-2">
+            {[
+              { label: '<45 dBA', value: noiseStats.data.data.bucket_under_45, color: 'bg-green-500' },
+              { label: '45-50 dBA', value: noiseStats.data.data.bucket_45_50, color: 'bg-lime-500' },
+              { label: '50-55 dBA', value: noiseStats.data.data.bucket_50_55, color: 'bg-yellow-500' },
+              { label: '55-60 dBA', value: noiseStats.data.data.bucket_55_60, color: 'bg-orange-500' },
+              { label: '60+ dBA', value: noiseStats.data.data.bucket_60_plus, color: 'bg-red-500' },
+            ].map((bucket) => {
+              const maxVal = Math.max(
+                noiseStats.data.data.bucket_under_45,
+                noiseStats.data.data.bucket_45_50,
+                noiseStats.data.data.bucket_50_55,
+                noiseStats.data.data.bucket_55_60,
+                noiseStats.data.data.bucket_60_plus,
+                1
+              );
+              return (
+                <div key={bucket.label} className="flex items-center gap-2">
+                  <span className="text-xs w-24 text-right">{bucket.label}</span>
+                  <div className="flex-1 bg-slate-100 dark:bg-slate-700 rounded-full h-6">
+                    <div
+                      className={`${bucket.color} rounded-full h-6 text-xs text-white text-right pr-2 leading-6`}
+                      style={{ width: `${(bucket.value / maxVal) * 100}%` }}
+                    >
+                      {bucket.value}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Aircraft Type Distribution */}
+      <div className="card">
+        <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
+          <span className="inline-flex items-center gap-1">
+            Aircraft Types <TooltipIcon text="Distribution of aircraft types tracked over Mannersdorf, sourced from ADSB.lol" />
+          </span>
+        </h3>
+        {aircraftTypes.isLoading ? (
+          <LoadingSpinner />
+        ) : aircraftTypes.data?.data && aircraftTypes.data.data.length > 0 ? (
+          <div className="space-y-2">
+            {aircraftTypes.data.data.slice(0, 10).map((row) => (
+              <div key={row.aircraft_type} className="flex items-center gap-2">
+                <span className="font-mono text-sm w-16">{row.aircraft_type}</span>
+                <div className="flex-1 bg-slate-100 dark:bg-slate-700 rounded-full h-5">
+                  <div
+                    className="bg-blue-500 rounded-full h-5 text-xs text-white text-right pr-2 leading-5"
+                    style={{ width: `${Math.min(100, (row.count / aircraftTypes.data.data[0].count) * 100)}%` }}
+                  >
+                    {row.count}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-slate-500 text-sm text-center py-8">No aircraft type data yet</p>
+        )}
       </div>
 
       {/* Hourly breakdown */}

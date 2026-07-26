@@ -59,6 +59,20 @@ export function useStatsHourly(date: string) {
   });
 }
 
+export function useAircraftTypes() {
+  return useQuery({
+    queryKey: ['stats', 'aircraft'],
+    queryFn: () => api.stats.aircraft(),
+  });
+}
+
+export function useNoiseStats() {
+  return useQuery({
+    queryKey: ['stats', 'noise'],
+    queryFn: () => api.stats.noise(),
+  });
+}
+
 // Noise
 export function useNoise(params: NoiseParams = {}) {
   return useQuery({

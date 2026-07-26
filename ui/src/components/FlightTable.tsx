@@ -38,6 +38,9 @@ export function FlightTable({ flights, meta, sort, order, onSort, onPage, onPerP
               <th className={headerClass('callsign')} onClick={() => onSort('callsign')}>
                 Callsign{sortIcon('callsign')}
               </th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                Aircraft
+              </th>
               <th className={headerClass('icao24')} onClick={() => onSort('icao24')}>
                 ICAO24{sortIcon('icao24')}
               </th>
@@ -65,12 +68,15 @@ export function FlightTable({ flights, meta, sort, order, onSort, onPage, onPerP
               <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">
                 Country
               </th>
+              <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                Est. dB
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
             {flights.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={12} className="px-3 py-8 text-center text-slate-500">
                   No flights found
                 </td>
               </tr>
@@ -82,6 +88,7 @@ export function FlightTable({ flights, meta, sort, order, onSort, onPage, onPerP
                       {f.callsign || '—'}
                     </Link>
                   </td>
+                  <td className="px-3 py-2 font-mono text-sm">{f.aircraft_type || '—'}</td>
                   <td className="px-3 py-2 font-mono text-sm">{f.icao24}</td>
                   <td className="px-3 py-2 text-sm whitespace-nowrap">{format(new Date(f.first_seen), 'MM/dd HH:mm:ss')}</td>
                   <td className="px-3 py-2 text-sm whitespace-nowrap">{format(new Date(f.last_seen), 'MM/dd HH:mm:ss')}</td>
@@ -103,6 +110,9 @@ export function FlightTable({ flights, meta, sort, order, onSort, onPage, onPerP
                     {f.is_vie_related && <Badge variant="blue">VIE</Badge>}
                   </td>
                   <td className="px-3 py-2 text-sm">{f.origin_country || '—'}</td>
+                  <td className="px-3 py-2 text-sm text-right font-mono">
+                    {f.estimated_db != null ? `${Number(f.estimated_db).toFixed(1)} dBA` : '—'}
+                  </td>
                 </tr>
               ))
             )}

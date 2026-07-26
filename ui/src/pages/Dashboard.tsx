@@ -21,6 +21,8 @@ const TOOLTIPS = {
   runway: 'Inferred runway based on the aircraft\'s heading, altitude, and position relative to LOWW',
   alt: 'Maximum altitude reached by the aircraft while crossing the Mannersdorf area',
   closest: 'Closest distance the aircraft came to Mannersdorf town center (Mannersdorfer Schloss)',
+  aircraft: 'ICAO aircraft type code (e.g. B738, A320) resolved via ADSB.lol public database',
+  estDb: 'Estimated peak noise at Mannersdorf center based on slant distance \u2014 geometric model, not calibrated measurement',
   week: 'Total flights tracked this calendar week',
   month: 'Total flights tracked this calendar month',
   alltime: 'All flights tracked since the system started recording data',
@@ -81,12 +83,12 @@ export default function Dashboard() {
                     </th>
                     <th className="text-left py-2 px-2 text-slate-500">
                       <span className="inline-flex items-center gap-0.5">
-                        Enter <TooltipIcon text={TOOLTIPS.enter} />
+                        Aircraft <TooltipIcon text={TOOLTIPS.aircraft} />
                       </span>
                     </th>
                     <th className="text-left py-2 px-2 text-slate-500">
                       <span className="inline-flex items-center gap-0.5">
-                        Leave <TooltipIcon text={TOOLTIPS.leave} />
+                        Enter <TooltipIcon text={TOOLTIPS.enter} />
                       </span>
                     </th>
                     <th className="text-left py-2 px-2 text-slate-500">
@@ -101,7 +103,7 @@ export default function Dashboard() {
                     </th>
                     <th className="text-right py-2 px-2 text-slate-500">
                       <span className="inline-flex items-center gap-0.5">
-                        Closest <TooltipIcon text={TOOLTIPS.closest} />
+                        Est. dB <TooltipIcon text={TOOLTIPS.estDb} position="right" />
                       </span>
                     </th>
                   </tr>
@@ -115,11 +117,11 @@ export default function Dashboard() {
                         </Link>
                         {f.is_vie_related && <Badge variant="blue" className="ml-1">VIE</Badge>}
                       </td>
-                      <td className="py-2 px-2 text-xs text-slate-500">
-                        {f.first_seen ? format(new Date(f.first_seen), 'HH:mm') : '—'}
+                      <td className="py-2 px-2 font-mono text-xs">
+                        {f.aircraft_type || '—'}
                       </td>
                       <td className="py-2 px-2 text-xs text-slate-500">
-                        {f.last_seen ? format(new Date(f.last_seen), 'HH:mm') : '—'}
+                        {f.first_seen ? format(new Date(f.first_seen), 'HH:mm') : '—'}
                       </td>
                       <td className="py-2 px-2">
                         {f.runway_used === '11/29' && <Badge variant="blue">11/29</Badge>}
@@ -127,8 +129,8 @@ export default function Dashboard() {
                         {(!f.runway_used || f.runway_used === 'UNKNOWN') && <Badge variant="gray">UNK</Badge>}
                       </td>
                       <td className="py-2 px-2 text-right">{f.max_altitude_m ? `${f.max_altitude_m}m` : '—'}</td>
-                      <td className="py-2 px-2 text-right text-xs text-slate-500 font-mono">
-                        {f.closest_distance_km != null ? `${Number(f.closest_distance_km).toFixed(1)} km` : '—'}
+                      <td className="py-2 px-2 text-right font-mono text-xs">
+                        {f.estimated_db != null ? `${Number(f.estimated_db).toFixed(1)} dBA` : '—'}
                       </td>
                     </tr>
                   ))}

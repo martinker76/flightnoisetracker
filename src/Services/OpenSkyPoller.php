@@ -34,6 +34,9 @@ class OpenSkyPoller
     /** @var array{inserted: int, updated: int, positions: int, errors: int} */
     private array $counters = ['inserted' => 0, 'updated' => 0, 'positions' => 0, 'errors' => 0];
 
+    /** @var array<string, string|null> Cache for resolved aircraft types within a poll cycle */
+    private array $aircraftTypeCache = [];
+
     public function __construct(private array $config)
     {
         $this->db = Database::getConnection();
@@ -243,6 +246,13 @@ class OpenSkyPoller
 
                 $this->counters['inserted']++;
 
+                // Resolve aircraft type from ADSB.lol
+                $aircraftType = $this->resolveAircraftType($icao24);
+                if ($aircraftType) {
+                    $stmt = $this->db->prepare('UPDATE flights SET aircraft_type = ? WHERE id = ?');
+                    $stmt->execute([$aircraftType, $flight['id']]);
+                }
+
                 // Insert position
                 $this->positionModel->create([
                     'flight_id' => $flight['id'],
@@ -259,6 +269,9 @@ class OpenSkyPoller
                 ]);
 
                 $this->counters['positions']++;
+
+                // Update estimated_db from closest position
+                $this->updateEstimatedDb((int)$flight['id']);
             } else {
                 // Existing flight: update last_seen, altitude, add position
                 $this->flightModel->updateTracking(
@@ -291,6 +304,9 @@ class OpenSkyPoller
                 if ($existingFlight['runway_used'] === 'UNKNOWN' && $existingFlight['is_vie_related']) {
                     $this->reclassifyFlight((int)$existingFlight['id']);
                 }
+
+                // Update estimated_db from closest position
+                $this->updateEstimatedDb((int)$existingFlight['id']);
             }
         } catch (\Throwable $e) {
             $this->counters['errors']++;
@@ -336,6 +352,91 @@ class OpenSkyPoller
                 $classification['runway'],
                 $classification['confidence']
             );
+        }
+    }
+
+    /**
+     * Resolve aircraft type from ADSB.lol public API.
+     */
+    private function resolveAircraftType(string $icao24): ?string
+    {
+        if (array_key_exists($icao24, $this->aircraftTypeCache)) {
+            return $this->aircraftTypeCache[$icao24];
+        }
+
+        $url = 'https://api.adsb.lol/v2/icao/' . strtolower($icao24);
+
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 5,
+            CURLOPT_CONNECTTIMEOUT => 3,
+            CURLOPT_USERAGENT => 'FlightNoiseTracker/1.0',
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($response === false || $httpCode !== 200) {
+            $this->aircraftTypeCache[$icao24] = null;
+            return null;
+        }
+
+        $data = json_decode($response, true);
+        if (!is_array($data) || empty($data['ac'][0]['t'])) {
+            $this->aircraftTypeCache[$icao24] = null;
+            return null;
+        }
+
+        $type = strtoupper(trim($data['ac'][0]['t']));
+        $this->aircraftTypeCache[$icao24] = $type;
+        return $type;
+    }
+
+    /**
+     * Calculate estimated noise level (dBA) at Mannersdorf center.
+     * Uses inverse-square-law geometric spreading model.
+     */
+    private function calculateEstimatedDb(float $distanceKm, ?float $altitudeM): ?float
+    {
+        if ($altitudeM === null) {
+            return null;
+        }
+
+        $altitudeKm = $altitudeM / 1000.0;
+        $dSlant = sqrt($distanceKm * $distanceKm + $altitudeKm * $altitudeKm);
+
+        if ($dSlant <= 0) {
+            return 95.0;
+        }
+
+        // L_est = L_ref - 20 * log10(d_slant / d_ref)
+        // L_ref = 80 dBA at d_ref = 0.3 km (300 m)
+        $estimatedDb = 80.0 - 20.0 * log10($dSlant / 0.3);
+
+        return round(min(95.0, max(0.0, $estimatedDb)), 1);
+    }
+
+    /**
+     * Update estimated_db on a flight based on its closest position.
+     */
+    private function updateEstimatedDb(int $flightId): void
+    {
+        $stmt = $this->db->prepare(
+            'SELECT distance_km, altitude_m FROM flight_positions
+             WHERE flight_id = ? AND distance_km IS NOT NULL
+             ORDER BY distance_km ASC LIMIT 1'
+        );
+        $stmt->execute([$flightId]);
+        $pos = $stmt->fetch();
+
+        if ($pos && $pos['altitude_m'] !== null) {
+            $estDb = $this->calculateEstimatedDb((float)$pos['distance_km'], (float)$pos['altitude_m']);
+            if ($estDb !== null) {
+                $upd = $this->db->prepare('UPDATE flights SET estimated_db = ? WHERE id = ?');
+                $upd->execute([$estDb, $flightId]);
+            }
         }
     }
 

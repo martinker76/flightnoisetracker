@@ -138,6 +138,8 @@ class FlightController
                                     'flight_id' => $id,
                                     'icao24' => $flight['icao24'],
                                     'callsign' => $flight['callsign'],
+                                    'aircraft_type' => $flight['aircraft_type'] ?? null,
+                                    'estimated_db' => $flight['estimated_db'] ?? null,
                                     'runway_used' => $flight['runway_used'],
                                     'is_vie_related' => (bool)$flight['is_vie_related'],
                                     'first_seen' => $flight['first_seen'],

@@ -239,6 +239,45 @@ class StatsController
     }
 
     /**
+     * GET /api/stats/aircraft — Aircraft type distribution.
+     */
+    public function aircraft(array $params): void
+    {
+        $stmt = $this->db->query(
+            'SELECT aircraft_type, COUNT(*) as count
+             FROM flights
+             WHERE aircraft_type IS NOT NULL
+             GROUP BY aircraft_type
+             ORDER BY count DESC
+             LIMIT 20'
+        );
+        $rows = $stmt->fetchAll();
+        $this->sendJson(['data' => $rows]);
+    }
+
+    /**
+     * GET /api/stats/noise — Noise statistics.
+     */
+    public function noise(array $params): void
+    {
+        $stats = $this->db->query(
+            'SELECT
+                MIN(estimated_db) as min_db,
+                MAX(estimated_db) as max_db,
+                AVG(estimated_db) as avg_db,
+                COUNT(*) as flights_with_noise,
+                SUM(CASE WHEN estimated_db < 45 THEN 1 ELSE 0 END) as bucket_under_45,
+                SUM(CASE WHEN estimated_db >= 45 AND estimated_db < 50 THEN 1 ELSE 0 END) as bucket_45_50,
+                SUM(CASE WHEN estimated_db >= 50 AND estimated_db < 55 THEN 1 ELSE 0 END) as bucket_50_55,
+                SUM(CASE WHEN estimated_db >= 55 AND estimated_db < 60 THEN 1 ELSE 0 END) as bucket_55_60,
+                SUM(CASE WHEN estimated_db >= 60 THEN 1 ELSE 0 END) as bucket_60_plus
+             FROM flights WHERE estimated_db IS NOT NULL'
+        )->fetch();
+
+        $this->sendJson(['data' => $stats]);
+    }
+
+    /**
      * Format stats row with proper types.
      */
     private function formatStats(array|false $row): array
