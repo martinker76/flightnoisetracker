@@ -1,6 +1,9 @@
 import type { FlightParams, NoiseParams, NoiseCreatePayload } from '../types';
 
-const BASE = '/api';
+// API base path — configure via VITE_API_BASE env var at build time.
+// Defaults to '/api' for dedicated-domain deployments.
+// On a subpath like /flightnoisetracker/, set VITE_API_BASE=/flightnoisetracker/api
+const BASE = import.meta.env.VITE_API_BASE ?? '/api';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {

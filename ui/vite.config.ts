@@ -3,9 +3,9 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  base: '/flightnoisetracker/',
   build: {
     outDir: '../public',
-    emptyOutDir: true,
     sourcemap: false,
   },
   server: {
