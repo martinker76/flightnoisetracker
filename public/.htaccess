@@ -16,15 +16,11 @@ RewriteRule ^ index.html [QSA,L]
     Header set Access-Control-Allow-Origin "*"
     Header set Access-Control-Allow-Methods "GET, POST, OPTIONS"
     Header set Access-Control-Allow-Headers "Content-Type, Authorization"
-</IfModule>
-
-# Handle preflight OPTIONS requests for API
-RewriteCond %{REQUEST_METHOD} OPTIONS
-RewriteRule ^api/ index.php [R=200,L]
-
-# Security headers
-<IfModule mod_headers.c>
     Header set X-Content-Type-Options "nosniff"
     Header set X-Frame-Options "DENY"
     Header set X-XSS-Protection "1; mode=block"
 </IfModule>
+
+# Handle preflight OPTIONS requests
+RewriteCond %{REQUEST_METHOD} OPTIONS
+RewriteRule ^api/ index.php [R=200,L]

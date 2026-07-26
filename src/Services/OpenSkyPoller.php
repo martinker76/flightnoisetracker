@@ -291,13 +291,17 @@ class OpenSkyPoller
     }
 
     /**
-     * Find an active flight for the given ICAO24 (seen within last 24 hours).
+     * Find an active flight for the given ICAO24 (seen within last 60 minutes).
+     *
+     * Tightened from 24h to 60min to avoid merging distinct overflights
+     * when the same aircraft circles back. Poll interval is 60s, so a
+     * single overpass should be visible for ~5-15 minutes.
      */
     private function findActiveFlight(string $icao24): ?array
     {
         $stmt = $this->db->prepare(
             'SELECT * FROM flights WHERE icao24 = :icao24 '
-            . 'AND last_seen >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR) '
+            . 'AND last_seen >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 60 MINUTE) '
             . 'ORDER BY last_seen DESC LIMIT 1'
         );
         $stmt->execute(['icao24' => $icao24]);

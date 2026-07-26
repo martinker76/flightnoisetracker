@@ -100,29 +100,23 @@ class Flight
 
     /**
      * Find or create a flight by icao24 and first_seen.
+     *
+     * Uses INSERT ... ON DUPLICATE KEY UPDATE with the uniq_icao_seen unique
+     * constraint to avoid race conditions between parallel poller runs.
      */
     public function findOrCreate(string $icao24, string $firstSeen, array $data): array
     {
         $stmt = $this->db->prepare(
-            'SELECT * FROM flights WHERE icao24 = :icao24 AND first_seen = :first_seen'
-        );
-        $stmt->execute(['icao24' => $icao24, 'first_seen' => $firstSeen]);
-        $existing = $stmt->fetch();
-
-        if ($existing) {
-            return $existing;
-        }
-
-        $insertStmt = $this->db->prepare(
             'INSERT INTO flights (icao24, callsign, origin_country, first_seen, last_seen, '
             . 'max_altitude_m, min_altitude_m, is_vie_related, runway_used, runway_confidence, '
             . 'operator, aircraft_type, registration) '
             . 'VALUES (:icao24, :callsign, :origin_country, :first_seen, :last_seen, '
             . ':max_altitude_m, :min_altitude_m, :is_vie_related, :runway_used, :runway_confidence, '
-            . ':operator, :aircraft_type, :registration)'
+            . ':operator, :aircraft_type, :registration) '
+            . 'ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)'
         );
 
-        $insertStmt->execute([
+        $stmt->execute([
             'icao24' => $icao24,
             'callsign' => $data['callsign'] ?? null,
             'origin_country' => $data['origin_country'] ?? null,
@@ -139,6 +133,15 @@ class Flight
         ]);
 
         $id = (int)$this->db->lastInsertId();
+        if ($id === 0) {
+            // Race condition: row existed but LAST_INSERT_ID() returned 0
+            // Fall back to SELECT
+            $sel = $this->db->prepare(
+                'SELECT * FROM flights WHERE icao24 = :icao24 AND first_seen = :first_seen'
+            );
+            $sel->execute(['icao24' => $icao24, 'first_seen' => $firstSeen]);
+            return $sel->fetch();
+        }
         return $this->findById($id);
     }
 
@@ -151,6 +154,9 @@ class Flight
         $params = ['id' => $id, 'last_seen' => $lastSeen];
 
         if ($altitudeM !== null) {
+            // Sentinel 99999 intentionally exceeds SMALLINT UNSIGNED max (65535)
+            // to ensure LEAST picks the new altitude when min_altitude_m is NULL.
+            // COALESCE returns BIGINT in this case, so the comparison works correctly.
             $sql .= ', max_altitude_m = GREATEST(COALESCE(max_altitude_m, 0), :alt_max), '
                   . 'min_altitude_m = LEAST(COALESCE(min_altitude_m, 99999), :alt_min)';
             $params['alt_max'] = $altitudeM;

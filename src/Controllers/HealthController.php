@@ -35,7 +35,8 @@ class HealthController
             $health['database'] = 'connected';
         } catch (\PDOException $e) {
             $health['status'] = 'degraded';
-            $health['database'] = 'error: ' . $e->getMessage();
+            $health['database'] = 'error: connection failed';
+            error_log('HealthController: DB connection failed: ' . $e->getMessage());
         }
 
         // Check last poll time

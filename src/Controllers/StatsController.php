@@ -92,7 +92,7 @@ class StatsController
 
         $stmt = $this->db->prepare(
             'SELECT
-                DATE(first_seen) AS stat_date,
+                DATE(first_seen) AS date,
                 COUNT(*) AS total_flights,
                 SUM(CASE WHEN is_vie_related = TRUE THEN 1 ELSE 0 END) AS vie_related,
                 SUM(CASE WHEN runway_used = \'11/29\' THEN 1 ELSE 0 END) AS runway_11_29,
@@ -102,7 +102,7 @@ class StatsController
             FROM flights
             WHERE first_seen >= :date_from AND first_seen <= :date_to
             GROUP BY DATE(first_seen)
-            ORDER BY stat_date ASC'
+            ORDER BY date ASC'
         );
 
         $stmt->execute([
@@ -190,7 +190,7 @@ class StatsController
 
         $stmt = $this->db->prepare(
             'SELECT
-                DATE(first_seen) AS stat_date,
+                DATE(first_seen) AS date,
                 COUNT(*) AS total_flights,
                 SUM(CASE WHEN is_vie_related = TRUE THEN 1 ELSE 0 END) AS vie_related,
                 SUM(CASE WHEN runway_used = \'11/29\' THEN 1 ELSE 0 END) AS runway_11_29,
@@ -199,7 +199,7 @@ class StatsController
             FROM flights
             WHERE first_seen >= :start
             GROUP BY DATE(first_seen)
-            ORDER BY stat_date ASC'
+            ORDER BY date ASC'
         );
 
         $stmt->execute(['start' => $startDate . ' 00:00:00']);
@@ -208,7 +208,7 @@ class StatsController
         // Index by date for gap filling
         $indexed = [];
         foreach ($rows as $row) {
-            $indexed[$row['stat_date']] = $row;
+            $indexed[$row['date']] = $row;
         }
 
         // Fill all days
@@ -216,7 +216,7 @@ class StatsController
         for ($i = 0; $i < $days; $i++) {
             $date = date('Y-m-d', strtotime("-{$i} days"));
             $trend[] = $indexed[$date] ?? [
-                'stat_date' => $date,
+                'date' => $date,
                 'total_flights' => 0,
                 'vie_related' => 0,
                 'runway_11_29' => 0,

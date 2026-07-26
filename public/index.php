@@ -21,18 +21,8 @@ $config = require __DIR__ . '/../config/app.php';
 // Set timezone
 date_default_timezone_set('UTC');
 
-// CORS headers for API requests
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
-header('X-Content-Type-Options: nosniff');
-header('X-Frame-Options: DENY');
-
-// Handle preflight
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit;
-}
+// CORS and security headers are set by .htaccess (single source of truth).
+// Preflight OPTIONS requests are also handled by .htaccess rewrite rules.
 
 // Parse method and URI
 $method = $_SERVER['REQUEST_METHOD'];

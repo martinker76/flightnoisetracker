@@ -85,9 +85,9 @@ class NoiseController
             return;
         }
 
-        // Validate optional lat/lon
-        $lat = isset($input['lat']) ? (float)$input['lat'] : null;
-        $lon = isset($input['lon']) ? (float)$input['lon'] : null;
+        // Validate optional lat/lon — accept both lat/lon and latitude/longitude
+        $lat = isset($input['lat']) ? (float)$input['lat'] : (isset($input['latitude']) ? (float)$input['latitude'] : null);
+        $lon = isset($input['lon']) ? (float)$input['lon'] : (isset($input['longitude']) ? (float)$input['longitude'] : null);
 
         if ($lat !== null && ($lat < -90 || $lat > 90)) {
             $this->sendError('lat must be between -90 and 90.', 'INVALID_PARAMETER', 422);

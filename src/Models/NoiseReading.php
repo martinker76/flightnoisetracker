@@ -37,8 +37,11 @@ class NoiseReading
         $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
         $stmt->execute();
 
+        $rows = $stmt->fetchAll();
+        $data = array_map([$this, 'formatNoise'], $rows);
+
         return [
-            'data' => $stmt->fetchAll(),
+            'data' => $data,
             'total' => $total,
         ];
     }
@@ -73,6 +76,17 @@ class NoiseReading
         $stmt = $this->db->prepare('SELECT * FROM noise_readings WHERE id = :id');
         $stmt->execute(['id' => $id]);
         $result = $stmt->fetch();
-        return $result ?: null;
+        return $result ? $this->formatNoise($result) : null;
+    }
+
+    /**
+     * Format noise reading row: map lat/lon to latitude/longitude for frontend.
+     */
+    private function formatNoise(array $row): array
+    {
+        $row['latitude'] = $row['lat'];
+        $row['longitude'] = $row['lon'];
+        unset($row['lat'], $row['lon']);
+        return $row;
     }
 }

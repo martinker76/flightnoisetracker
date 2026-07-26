@@ -61,9 +61,21 @@ class FlightPosition
     }
 
     /**
-     * Get positions as GeoJSON LineString.
+     * Get positions as GeoJSON FeatureCollection.
      */
     public function toGeoJson(int $flightId, array $flight): array
+    {
+        $feature = $this->buildSingleFeature($flightId, $flight);
+        return [
+            'type' => 'FeatureCollection',
+            'features' => [$feature],
+        ];
+    }
+
+    /**
+     * Build a single GeoJSON Feature with LineString geometry.
+     */
+    private function buildSingleFeature(int $flightId, array $flight): array
     {
         $positions = $this->findByFlightId($flightId);
 
