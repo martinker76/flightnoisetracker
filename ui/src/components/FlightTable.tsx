@@ -42,7 +42,13 @@ export function FlightTable({ flights, meta, sort, order, onSort, onPage, onPerP
                 ICAO24{sortIcon('icao24')}
               </th>
               <th className={headerClass('first_seen')} onClick={() => onSort('first_seen')}>
-                First Seen{sortIcon('first_seen')}
+                Enter{sortIcon('first_seen')}
+              </th>
+              <th className={headerClass('last_seen')} onClick={() => onSort('last_seen')}>
+                Leave{sortIcon('last_seen')}
+              </th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                Duration
               </th>
               <th className={headerClass('max_altitude_m')} onClick={() => onSort('max_altitude_m')}>
                 Max Alt{sortIcon('max_altitude_m')}
@@ -61,7 +67,7 @@ export function FlightTable({ flights, meta, sort, order, onSort, onPage, onPerP
           <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
             {flights.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={9} className="px-3 py-8 text-center text-slate-500">
                   No flights found
                 </td>
               </tr>
@@ -74,7 +80,17 @@ export function FlightTable({ flights, meta, sort, order, onSort, onPage, onPerP
                     </Link>
                   </td>
                   <td className="px-3 py-2 font-mono text-sm">{f.icao24}</td>
-                  <td className="px-3 py-2 text-sm">{format(new Date(f.first_seen), 'MM/dd HH:mm:ss')}</td>
+                  <td className="px-3 py-2 text-sm whitespace-nowrap">{format(new Date(f.first_seen), 'MM/dd HH:mm:ss')}</td>
+                  <td className="px-3 py-2 text-sm whitespace-nowrap">{format(new Date(f.last_seen), 'MM/dd HH:mm:ss')}</td>
+                  <td className="px-3 py-2 text-sm">{
+                    (() => {
+                      const diffMs = new Date(f.last_seen).getTime() - new Date(f.first_seen).getTime();
+                      if (diffMs < 1000) return '—';
+                      const mins = Math.floor(diffMs / 60000);
+                      const secs = Math.floor((diffMs % 60000) / 1000);
+                      return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+                    })()
+                  }</td>
                   <td className="px-3 py-2 text-sm">{f.max_altitude_m ? `${f.max_altitude_m} m` : '—'}</td>
                   <td className="px-3 py-2"><RunwayBadge runway={f.runway_used} /></td>
                   <td className="px-3 py-2">

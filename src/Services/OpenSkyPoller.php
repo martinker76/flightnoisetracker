@@ -24,14 +24,12 @@ class OpenSkyPoller
     private FlightPosition $positionModel;
     private Aircraft $aircraftModel;
     private RunwayClassifier $classifier;
+    private OpenSkyAuth $auth;
 
     private float $minLat;
     private float $maxLat;
     private float $minLon;
     private float $maxLon;
-
-    private ?string $username;
-    private ?string $password;
 
     /** @var array{inserted: int, updated: int, positions: int, errors: int} */
     private array $counters = ['inserted' => 0, 'updated' => 0, 'positions' => 0, 'errors' => 0];
@@ -42,6 +40,7 @@ class OpenSkyPoller
         $this->flightModel = new Flight();
         $this->positionModel = new FlightPosition();
         $this->aircraftModel = new Aircraft();
+        $this->auth = new OpenSkyAuth($config['opensky']);
 
         $this->classifier = new RunwayClassifier($config['airport']);
 
@@ -50,9 +49,6 @@ class OpenSkyPoller
         $this->maxLat = (float)$box['max_lat'];
         $this->minLon = (float)$box['min_lon'];
         $this->maxLon = (float)$box['max_lon'];
-
-        $this->username = $config['opensky']['username'] ?? null;
-        $this->password = $config['opensky']['password'] ?? null;
     }
 
     /**
@@ -118,9 +114,14 @@ class OpenSkyPoller
             ],
         ]);
 
-        // Add authentication if configured
-        if ($this->username !== null && $this->password !== null) {
-            curl_setopt($ch, CURLOPT_USERPWD, $this->username . ':' . $this->password);
+        // Add OAuth2 Bearer token if configured
+        $authHeaders = $this->auth->headers();
+        if (!empty($authHeaders)) {
+            $existingHeaders = [
+                'Accept: application/json',
+                'User-Agent: FlightNoiseTracker/1.0',
+            ];
+            curl_setopt($ch, CURLOPT_HTTPHEADER, array_merge($existingHeaders, $authHeaders));
         }
 
         $response = curl_exec($ch);

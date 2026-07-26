@@ -54,12 +54,25 @@ export default function FlightDetail() {
             </p>
           </div>
           <div>
-            <p className="text-xs text-slate-500">First Seen</p>
-            <p>{format(new Date(f.first_seen), 'PPpp')}</p>
+            <p className="text-xs text-slate-500">Entering Airspace</p>
+            <p className="font-medium">{format(new Date(f.first_seen), 'PPpp')}</p>
           </div>
           <div>
-            <p className="text-xs text-slate-500">Last Seen</p>
-            <p>{format(new Date(f.last_seen), 'PPpp')}</p>
+            <p className="text-xs text-slate-500">Leaving Airspace</p>
+            <p className="font-medium">{format(new Date(f.last_seen), 'PPpp')}</p>
+          </div>
+          <div>
+            <p className="text-xs text-slate-500">Duration Over Airspace</p>
+            <p className="font-medium">{(() => {
+              const diffMs = new Date(f.last_seen).getTime() - new Date(f.first_seen).getTime();
+              if (diffMs < 1000) return 'Instantaneous';
+              const secs = Math.floor(diffMs / 1000) % 60;
+              const mins = Math.floor(diffMs / 60000) % 60;
+              const hours = Math.floor(diffMs / 3600000);
+              if (hours > 0) return `${hours}h ${mins}m ${secs}s`;
+              if (mins > 0) return `${mins}m ${secs}s`;
+              return `${secs}s`;
+            })()}</p>
           </div>
           <div>
             <p className="text-xs text-slate-500">Max Altitude</p>

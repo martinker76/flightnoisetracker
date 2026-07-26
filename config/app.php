@@ -19,8 +19,8 @@ return [
         'runway_classify_max_alt_m' => 6000,
     ],
     'opensky' => [
-        'username' => null,
-        'password' => null,
+        'client_id' => getenv('FNT_OSKY_CLIENT_ID') ?: null,
+        'client_secret' => getenv('FNT_OSKY_CLIENT_SECRET') ?: null,
     ],
     'adsbexchange_api_key' => null,
 
