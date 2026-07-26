@@ -59,6 +59,8 @@ export default function Dashboard() {
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-slate-700">
                     <th className="text-left py-2 px-2 text-slate-500">Callsign</th>
+                    <th className="text-left py-2 px-2 text-slate-500">Enter</th>
+                    <th className="text-left py-2 px-2 text-slate-500">Leave</th>
                     <th className="text-left py-2 px-2 text-slate-500">Runway</th>
                     <th className="text-right py-2 px-2 text-slate-500">Alt</th>
                   </tr>
@@ -71,6 +73,12 @@ export default function Dashboard() {
                           {f.callsign || f.icao24}
                         </Link>
                         {f.is_vie_related && <Badge variant="blue" className="ml-1">VIE</Badge>}
+                      </td>
+                      <td className="py-2 px-2 text-xs text-slate-500">
+                        {f.first_seen ? format(new Date(f.first_seen), 'HH:mm') : '—'}
+                      </td>
+                      <td className="py-2 px-2 text-xs text-slate-500">
+                        {f.last_seen ? format(new Date(f.last_seen), 'HH:mm') : '—'}
                       </td>
                       <td className="py-2 px-2">
                         {f.runway_used === '11/29' && <Badge variant="blue">11/29</Badge>}
