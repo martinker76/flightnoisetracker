@@ -18,10 +18,10 @@ A web application that tracks aircraft movements over **Mannersdorf am Leithageb
 The target area is centered on Mannersdorf (~47.97 N, 16.61 E). The bounding box should generously cover the town and the immediate airspace through which VIE arrivals and departures pass overhead.
 
 ```
-min_lat: 47.93
-max_lat: 48.01
-min_lon: 16.56
-max_lon: 16.66
+min_lat: 47.947
+max_lat: 48.001
+min_lon: 16.570
+max_lon: 16.638
 ```
 
 Flights **entering this box at any altitude** (0–12,000 m) are captured and persisted.
@@ -337,10 +337,10 @@ A PHP CLI script `cron/poll.php` runs via systemd timer every 60 seconds.
 <?php
 return [
     'bounding_box' => [
-        'min_lat' => 47.93,
-        'max_lat' => 48.01,
-        'min_lon' => 16.56,
-        'max_lon' => 16.66,
+        'min_lat' => 47.947,
+        'max_lat' => 48.001,
+        'min_lon' => 16.570,
+        'max_lon' => 16.638,
     ],
     'altitude_max_m' => 12000,
     'polling_interval_s' => 60,

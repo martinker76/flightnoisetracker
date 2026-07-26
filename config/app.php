@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 return [
     'bounding_box' => [
-        'min_lat' => 47.93,
-        'max_lat' => 48.01,
-        'min_lon' => 16.56,
-        'max_lon' => 16.66,
+        'min_lat' => 47.947,
+        'max_lat' => 48.001,
+        'min_lon' => 16.570,
+        'max_lon' => 16.638,
     ],
     'altitude_max_m' => 12000,
     'polling_interval_s' => 60,

@@ -14,8 +14,8 @@ L.Icon.Default.mergeOptions({
 const MANNERSDORF: [number, number] = [47.97, 16.61];
 const LOWW: [number, number] = [48.1103, 16.5697];
 const BOUNDS: L.LatLngBoundsExpression = [
-  [47.93, 16.56],
-  [48.01, 16.66],
+  [47.947, 16.570],
+  [48.001, 16.638],
 ];
 
 const airportIcon = L.divIcon({
