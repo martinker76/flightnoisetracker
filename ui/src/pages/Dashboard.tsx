@@ -7,7 +7,24 @@ import { MapView } from '../components/MapView';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorAlert } from '../components/ErrorAlert';
 import { Badge } from '../components/Badge';
+import { TooltipIcon } from '../components/TooltipIcon';
 import { format } from 'date-fns';
+
+const TOOLTIPS = {
+  today: 'Number of unique flights that crossed over the Mannersdorf tracking area today',
+  vie: 'Flights arriving at or departing from Vienna International Airport (LOWW)',
+  rwy: 'Flights using runway 11/29 (ESE–WNW orientation) based on heading and altitude analysis',
+  overflights: 'Flights passing over Mannersdorf without a direct connection to VIE (overflights)',
+  callsign: 'Aircraft callsign or ICAO 24-bit transponder code if no callsign available',
+  enter: 'Time the aircraft first entered the Mannersdorf tracking area',
+  leave: 'Time the aircraft was last detected within the Mannersdorf tracking area',
+  runway: 'Inferred runway based on the aircraft\'s heading, altitude, and position relative to LOWW',
+  alt: 'Maximum altitude reached by the aircraft while crossing the Mannersdorf area',
+  closest: 'Closest distance the aircraft came to Mannersdorf town center (Mannersdorfer Schloss)',
+  week: 'Total flights tracked this calendar week',
+  month: 'Total flights tracked this calendar month',
+  alltime: 'All flights tracked since the system started recording data',
+};
 
 export default function Dashboard() {
   const summary = useStatsSummary();
@@ -28,10 +45,10 @@ export default function Dashboard() {
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatsCard label="Today's Flights" value={today?.total_flights ?? 0} icon="✈️" color="blue" />
-        <StatsCard label="VIE-Related" value={today?.vie_related ?? 0} icon="🇦🇹" color="yellow" />
-        <StatsCard label="Runway 11/29" value={today?.runway_11_29 ?? 0} icon="🔵" color="blue" />
-        <StatsCard label="Overflights" value={today?.overflights ?? 0} icon="🔴" color="red" />
+        <StatsCard label="Today's Flights" value={today?.total_flights ?? 0} icon="✈️" color="blue" tooltip={TOOLTIPS.today} />
+        <StatsCard label="VIE-Related" value={today?.vie_related ?? 0} icon="🇦🇹" color="yellow" tooltip={TOOLTIPS.vie} />
+        <StatsCard label="Runway 11/29" value={today?.runway_11_29 ?? 0} icon="🔵" color="blue" tooltip={TOOLTIPS.rwy} />
+        <StatsCard label="Overflights" value={today?.overflights ?? 0} icon="🔴" color="red" tooltip={TOOLTIPS.overflights} />
       </div>
 
       {/* Charts row */}
@@ -58,12 +75,36 @@ export default function Dashboard() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-slate-700">
-                    <th className="text-left py-2 px-2 text-slate-500">Callsign</th>
-                    <th className="text-left py-2 px-2 text-slate-500">Enter</th>
-                    <th className="text-left py-2 px-2 text-slate-500">Leave</th>
-                    <th className="text-left py-2 px-2 text-slate-500">Runway</th>
-                    <th className="text-right py-2 px-2 text-slate-500">Alt</th>
-                    <th className="text-right py-2 px-2 text-slate-500">Closest</th>
+                    <th className="text-left py-2 px-2 text-slate-500">
+                      <span className="inline-flex items-center gap-0.5">
+                        Callsign <TooltipIcon text={TOOLTIPS.callsign} />
+                      </span>
+                    </th>
+                    <th className="text-left py-2 px-2 text-slate-500">
+                      <span className="inline-flex items-center gap-0.5">
+                        Enter <TooltipIcon text={TOOLTIPS.enter} />
+                      </span>
+                    </th>
+                    <th className="text-left py-2 px-2 text-slate-500">
+                      <span className="inline-flex items-center gap-0.5">
+                        Leave <TooltipIcon text={TOOLTIPS.leave} />
+                      </span>
+                    </th>
+                    <th className="text-left py-2 px-2 text-slate-500">
+                      <span className="inline-flex items-center gap-0.5">
+                        Runway <TooltipIcon text={TOOLTIPS.runway} />
+                      </span>
+                    </th>
+                    <th className="text-right py-2 px-2 text-slate-500">
+                      <span className="inline-flex items-center gap-0.5">
+                        Alt <TooltipIcon text={TOOLTIPS.alt} />
+                      </span>
+                    </th>
+                    <th className="text-right py-2 px-2 text-slate-500">
+                      <span className="inline-flex items-center gap-0.5">
+                        Closest <TooltipIcon text={TOOLTIPS.closest} />
+                      </span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -101,9 +142,9 @@ export default function Dashboard() {
 
       {/* Week / Month summary */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatsCard label="This Week" value={summary.data?.data?.week?.total_flights ?? 0} icon="📅" color="green" />
-        <StatsCard label="This Month" value={summary.data?.data?.month?.total_flights ?? 0} icon="📆" color="slate" />
-        <StatsCard label="All Time" value={summary.data?.data?.all_time?.total_flights ?? 0} icon="🏛️" color="yellow" />
+        <StatsCard label="This Week" value={summary.data?.data?.week?.total_flights ?? 0} icon="📅" color="green" tooltip={TOOLTIPS.week} />
+        <StatsCard label="This Month" value={summary.data?.data?.month?.total_flights ?? 0} icon="📆" color="slate" tooltip={TOOLTIPS.month} />
+        <StatsCard label="All Time" value={summary.data?.data?.all_time?.total_flights ?? 0} icon="🏛️" color="yellow" tooltip={TOOLTIPS.alltime} />
       </div>
     </div>
   );

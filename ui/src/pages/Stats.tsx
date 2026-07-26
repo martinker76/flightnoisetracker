@@ -7,7 +7,20 @@ import { RunwayBarChart } from '../components/RunwayBarChart';
 import { HourlyChart } from '../components/HourlyChart';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorAlert } from '../components/ErrorAlert';
+import { TooltipIcon } from '../components/TooltipIcon';
 import { format, subDays } from 'date-fns';
+
+const TOOLTIPS = {
+  total: 'Total number of unique flights tracked since the system started recording',
+  vie: 'Flights arriving at or departing from Vienna International Airport (LOWW)',
+  overflights: 'Flights passing over Mannersdorf without a direct connection to VIE',
+  mostUsedRwy: 'The runway configuration that has been used most frequently over the entire tracked period',
+  trend: 'Daily flight counts over the selected time period, broken down by runway configuration',
+  rwyByDay: 'Daily breakdown of flights showing which runway configuration each used',
+  hourly: 'Flight activity distributed by hour of the day for the selected date',
+  avgDay: 'Estimated average flights per day — total flights divided by the number of days tracked',
+  mostActive: 'The hour of day with the highest volume of flights crossing the Mannersdorf area',
+};
 
 export default function Stats() {
   const summary = useStatsSummary();
@@ -28,7 +41,7 @@ export default function Stats() {
 
   // Calculate key numbers
   const totalFlights = all?.total_flights ?? 0;
-  const avgPerDay = all?.total_flights ? Math.round(all.total_flights / Math.max(1, 30)) : 0; // rough
+  const avgPerDay = all?.total_flights ? Math.round(all.total_flights / Math.max(1, 30)) : 0;
   const mostUsedRunway = all
     ? all.runway_11_29 >= all.runway_16_34
       ? '11/29'
@@ -49,16 +62,20 @@ export default function Stats() {
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatsCard label="Total Flights" value={totalFlights} icon="✈️" color="blue" />
-        <StatsCard label="VIE-Related" value={all?.vie_related ?? 0} icon="🇦🇹" color="yellow" />
-        <StatsCard label="Overflights" value={all?.overflights ?? 0} icon="🔴" color="red" />
-        <StatsCard label="Most Used Runway" value={mostUsedRunway} icon="🛬" color="green" />
+        <StatsCard label="Total Flights" value={totalFlights} icon="✈️" color="blue" tooltip={TOOLTIPS.total} />
+        <StatsCard label="VIE-Related" value={all?.vie_related ?? 0} icon="🇦🇹" color="yellow" tooltip={TOOLTIPS.vie} />
+        <StatsCard label="Overflights" value={all?.overflights ?? 0} icon="🔴" color="red" tooltip={TOOLTIPS.overflights} />
+        <StatsCard label="Most Used Runway" value={mostUsedRunway} icon="🛬" color="green" tooltip={TOOLTIPS.mostUsedRwy} />
       </div>
 
       {/* Trend chart */}
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">Trend</h3>
+          <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">
+            <span className="inline-flex items-center gap-1">
+              Trend <TooltipIcon text={TOOLTIPS.trend} />
+            </span>
+          </h3>
           <div className="flex gap-1">
             {[7, 14, 30, 90].map((d) => (
               <button
@@ -83,7 +100,11 @@ export default function Stats() {
         <div className="lg:col-span-2">
           <div className="card">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-              <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">Runway Usage by Day</h3>
+              <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                <span className="inline-flex items-center gap-1">
+                  Runway Usage by Day <TooltipIcon text={TOOLTIPS.rwyByDay} />
+                </span>
+              </h3>
               <div className="flex items-center gap-2">
                 <input
                   type="date"
@@ -123,7 +144,11 @@ export default function Stats() {
       {/* Hourly breakdown */}
       <div className="card">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-          <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">Hourly Breakdown</h3>
+          <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">
+            <span className="inline-flex items-center gap-1">
+              Hourly Breakdown <TooltipIcon text={TOOLTIPS.hourly} />
+            </span>
+          </h3>
           <input
             type="date"
             value={hourlyDate}
@@ -143,15 +168,27 @@ export default function Stats() {
       {/* Key numbers */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="card text-center">
-          <p className="text-xs text-slate-500">Total Flights</p>
+          <p className="text-xs text-slate-500">
+            <span className="inline-flex items-center gap-0.5">
+              Total Flights <TooltipIcon text={TOOLTIPS.total} />
+            </span>
+          </p>
           <p className="text-2xl font-bold">{totalFlights.toLocaleString()}</p>
         </div>
         <div className="card text-center">
-          <p className="text-xs text-slate-500">Avg/Day (est.)</p>
+          <p className="text-xs text-slate-500">
+            <span className="inline-flex items-center gap-0.5">
+              Avg/Day (est.) <TooltipIcon text={TOOLTIPS.avgDay} />
+            </span>
+          </p>
           <p className="text-2xl font-bold">{avgPerDay}</p>
         </div>
         <div className="card text-center">
-          <p className="text-xs text-slate-500">Most Active Hour</p>
+          <p className="text-xs text-slate-500">
+            <span className="inline-flex items-center gap-0.5">
+              Most Active Hour <TooltipIcon text={TOOLTIPS.mostActive} />
+            </span>
+          </p>
           <p className="text-2xl font-bold">
             {mostActiveHour ? `${mostActiveHour.hour.toString().padStart(2, '0')}:00` : '—'}
           </p>
@@ -160,7 +197,11 @@ export default function Stats() {
           )}
         </div>
         <div className="card text-center">
-          <p className="text-xs text-slate-500">Most Used Runway</p>
+          <p className="text-xs text-slate-500">
+            <span className="inline-flex items-center gap-0.5">
+              Most Used Runway <TooltipIcon text={TOOLTIPS.mostUsedRwy} />
+            </span>
+          </p>
           <p className="text-2xl font-bold">{mostUsedRunway}</p>
         </div>
       </div>
