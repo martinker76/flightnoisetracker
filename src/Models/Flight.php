@@ -20,11 +20,22 @@ class Flight
     }
 
     /**
+     * Subquery for closest distance to Mannersdorf center.
+     */
+    private static string $closestDistanceSql = '(
+        SELECT MIN(distance_km)
+        FROM flight_positions
+        WHERE flight_id = flights.id
+    ) AS closest_distance_km';
+
+    /**
      * Find a flight by ID.
      */
     public function findById(int $id): ?array
     {
-        $stmt = $this->db->prepare('SELECT * FROM flights WHERE id = :id');
+        $stmt = $this->db->prepare(
+            'SELECT *, ' . self::$closestDistanceSql . ' FROM flights WHERE id = :id'
+        );
         $stmt->execute(['id' => $id]);
         $result = $stmt->fetch();
         return $result ?: null;
@@ -82,7 +93,7 @@ class Flight
 
         // Fetch page
         $offset = ($page - 1) * $perPage;
-        $sql = "SELECT * FROM flights {$whereClause} ORDER BY {$sort} {$order} LIMIT :limit OFFSET :offset";
+        $sql = "SELECT *, " . self::$closestDistanceSql . " FROM flights {$whereClause} ORDER BY {$sort} {$order} LIMIT :limit OFFSET :offset";
         $stmt = $this->db->prepare($sql);
 
         foreach ($params as $key => $value) {
@@ -207,7 +218,7 @@ class Flight
 
         $offset = ($page - 1) * $perPage;
         $stmt = $this->db->prepare(
-            'SELECT * FROM flights WHERE is_vie_related = TRUE '
+            'SELECT *, ' . self::$closestDistanceSql . ' FROM flights WHERE is_vie_related = TRUE '
             . 'AND first_seen >= :date_start AND first_seen <= :date_end '
             . 'ORDER BY first_seen ASC LIMIT :limit OFFSET :offset'
         );

@@ -82,6 +82,10 @@ export default function FlightDetail() {
             <p className="text-xs text-slate-500">Min Altitude</p>
             <p>{f.min_altitude_m ? `${f.min_altitude_m} m` : '—'}</p>
           </div>
+          <div>
+            <p className="text-xs text-slate-500">Closest Point to Mannersdorf</p>
+            <p className="font-medium">{f.closest_distance_km != null ? `${Number(f.closest_distance_km).toFixed(2)} km` : '—'}</p>
+          </div>
         </div>
       </div>
 

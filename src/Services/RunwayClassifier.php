@@ -287,7 +287,7 @@ class RunwayClassifier
      */
     public function distanceFromMannersdorf(float $lat, float $lon): float
     {
-        // Mannersdorf am Leithagebirge center
-        return $this->haversineDistance($lat, $lon, 47.97, 16.61);
+        // Mannersdorf am Leithagebirge center (47.974, 16.604)
+        return $this->haversineDistance($lat, $lon, 47.974, 16.604);
     }
 }

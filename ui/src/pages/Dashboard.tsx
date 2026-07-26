@@ -63,6 +63,7 @@ export default function Dashboard() {
                     <th className="text-left py-2 px-2 text-slate-500">Leave</th>
                     <th className="text-left py-2 px-2 text-slate-500">Runway</th>
                     <th className="text-right py-2 px-2 text-slate-500">Alt</th>
+                    <th className="text-right py-2 px-2 text-slate-500">Closest</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -86,6 +87,9 @@ export default function Dashboard() {
                         {(!f.runway_used || f.runway_used === 'UNKNOWN') && <Badge variant="gray">UNK</Badge>}
                       </td>
                       <td className="py-2 px-2 text-right">{f.max_altitude_m ? `${f.max_altitude_m}m` : '—'}</td>
+                      <td className="py-2 px-2 text-right text-xs text-slate-500 font-mono">
+                        {f.closest_distance_km != null ? `${Number(f.closest_distance_km).toFixed(1)} km` : '—'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

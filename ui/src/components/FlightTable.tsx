@@ -53,6 +53,9 @@ export function FlightTable({ flights, meta, sort, order, onSort, onPage, onPerP
               <th className={headerClass('max_altitude_m')} onClick={() => onSort('max_altitude_m')}>
                 Max Alt{sortIcon('max_altitude_m')}
               </th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                Closest
+              </th>
               <th className={headerClass('runway_used')} onClick={() => onSort('runway_used')}>
                 Runway{sortIcon('runway_used')}
               </th>
@@ -67,7 +70,7 @@ export function FlightTable({ flights, meta, sort, order, onSort, onPage, onPerP
           <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
             {flights.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={10} className="px-3 py-8 text-center text-slate-500">
                   No flights found
                 </td>
               </tr>
@@ -92,6 +95,9 @@ export function FlightTable({ flights, meta, sort, order, onSort, onPage, onPerP
                     })()
                   }</td>
                   <td className="px-3 py-2 text-sm">{f.max_altitude_m ? `${f.max_altitude_m} m` : '—'}</td>
+                  <td className="px-3 py-2 text-sm text-right font-mono" title="Closest approach to Mannersdorf center">
+                    {f.closest_distance_km != null ? `${Number(f.closest_distance_km).toFixed(1)} km` : '—'}
+                  </td>
                   <td className="px-3 py-2"><RunwayBadge runway={f.runway_used} /></td>
                   <td className="px-3 py-2">
                     {f.is_vie_related && <Badge variant="blue">VIE</Badge>}
