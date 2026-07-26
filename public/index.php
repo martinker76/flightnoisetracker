@@ -3,50 +3,65 @@
 declare(strict_types=1);
 
 /**
- * FlightNoiseTracker API Entry Point
+ * FlightNoiseTracker — API Entry Point
  *
- * All requests are routed through this file via .htaccess rewrite.
+ * Serves as the front controller for API routes.
+ * Static assets and SPA routes are handled by Apache/.htaccess.
  */
 
-// Bootstrap autoloader
+error_reporting(E_ALL);
+ini_set('display_errors', '0');
+
+// Autoloader
 require_once __DIR__ . '/../vendor/autoload.php';
 
-use App\Router;
-use App\Controllers\FlightController;
-use App\Controllers\StatsController;
-use App\Controllers\NoiseController;
-use App\Controllers\AircraftController;
-use App\Controllers\HealthController;
+// Load config
+$config = require __DIR__ . '/../config/app.php';
 
-// Handle CORS preflight
+// Set timezone
+date_default_timezone_set('UTC');
+
+// CORS headers for API requests
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+
+// Handle preflight
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
 }
 
-// Load config
-$config = require __DIR__ . '/../config/app.php';
+// Parse method and URI
+$method = $_SERVER['REQUEST_METHOD'];
+$uri = $_SERVER['REQUEST_URI'];
 
-// Initialize router
-$router = new Router();
+// Initialize the router
+$router = new App\Router();
 
-// Register routes
-$router->get('/api/health', [HealthController::class, 'index']);
+// Health
+$router->get('/api/health', [App\Controllers\HealthController::class, 'index']);
 
-$router->get('/api/flights', [FlightController::class, 'index']);
-$router->get('/api/flights/vie/daily', [FlightController::class, 'vieDaily']);
-$router->get('/api/flights/{id}', [FlightController::class, 'show']);
-$router->get('/api/flights/{id}/track', [FlightController::class, 'track']);
+// Flights
+$router->get('/api/flights', [App\Controllers\FlightController::class, 'index']);
+$router->get('/api/flights/vie/daily', [App\Controllers\FlightController::class, 'vieDaily']);
+$router->get('/api/flights/{id}', [App\Controllers\FlightController::class, 'show']);
+$router->get('/api/flights/{id}/track', [App\Controllers\FlightController::class, 'track']);
 
-$router->get('/api/stats/summary', [StatsController::class, 'summary']);
-$router->get('/api/stats/runways', [StatsController::class, 'runways']);
-$router->get('/api/stats/hourly', [StatsController::class, 'hourly']);
-$router->get('/api/stats/trend', [StatsController::class, 'trend']);
+// Stats
+$router->get('/api/stats/summary', [App\Controllers\StatsController::class, 'summary']);
+$router->get('/api/stats/runways', [App\Controllers\StatsController::class, 'runways']);
+$router->get('/api/stats/hourly', [App\Controllers\StatsController::class, 'hourly']);
+$router->get('/api/stats/trend', [App\Controllers\StatsController::class, 'trend']);
 
-$router->post('/api/noise', [NoiseController::class, 'store']);
-$router->get('/api/noise', [NoiseController::class, 'index']);
+// Noise
+$router->get('/api/noise', [App\Controllers\NoiseController::class, 'index']);
+$router->post('/api/noise', [App\Controllers\NoiseController::class, 'store']);
 
-$router->get('/api/aircraft/{icao24}', [AircraftController::class, 'show']);
+// Aircraft
+$router->get('/api/aircraft/{icao24}', [App\Controllers\AircraftController::class, 'show']);
 
-// Dispatch the request
-$router->dispatch($_SERVER['REQUEST_METHOD'], $_SERVER['REQUEST_URI'], $config);
+// Dispatch
+$router->dispatch($method, $uri, $config);

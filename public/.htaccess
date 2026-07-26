@@ -1,20 +1,26 @@
 RewriteEngine On
 
-# Redirect all requests to index.php (except existing files/dirs)
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^ index.php [QSA,L]
+# If it's a real file or directory, serve it directly
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
 
-# CORS headers for SPA frontend
+# API routes go to index.php
+RewriteRule ^api/ index.php [QSA,L]
+
+# Everything else: serve index.html (SPA client-side routing)
+RewriteRule ^ index.html [QSA,L]
+
+# CORS headers for API responses
 <IfModule mod_headers.c>
     Header set Access-Control-Allow-Origin "*"
     Header set Access-Control-Allow-Methods "GET, POST, OPTIONS"
     Header set Access-Control-Allow-Headers "Content-Type, Authorization"
 </IfModule>
 
-# Handle preflight OPTIONS requests
+# Handle preflight OPTIONS requests for API
 RewriteCond %{REQUEST_METHOD} OPTIONS
-RewriteRule ^(.*)$ index.php [R=200,L]
+RewriteRule ^api/ index.php [R=200,L]
 
 # Security headers
 <IfModule mod_headers.c>

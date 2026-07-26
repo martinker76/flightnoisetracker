@@ -1,0 +1,41 @@
+import { Doughnut } from 'react-chartjs-2';
+import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
+
+ChartJS.register(ArcElement, Tooltip, Legend);
+
+interface Props {
+  runway_11_29: number;
+  runway_16_34: number;
+  runway_unknown: number;
+}
+
+export function RunwayChart({ runway_11_29, runway_16_34, runway_unknown }: Props) {
+  const data = {
+    labels: ['11/29', '16/34', 'UNKNOWN'],
+    datasets: [
+      {
+        data: [runway_11_29, runway_16_34, runway_unknown],
+        backgroundColor: ['#3b82f6', '#22c55e', '#94a3b8'],
+        borderWidth: 2,
+        borderColor: '#ffffff',
+      },
+    ],
+  };
+
+  const options = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { position: 'bottom' as const },
+    },
+  };
+
+  return (
+    <div className="card">
+      <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Runway Distribution</h3>
+      <div className="h-56">
+        <Doughnut data={data} options={options} />
+      </div>
+    </div>
+  );
+}
