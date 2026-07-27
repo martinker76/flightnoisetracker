@@ -50,8 +50,12 @@ class HealthController
 
             if ($pollState) {
                 $health['last_poll'] = [
-                    'last_poll_at' => $pollState['last_poll_at'],
-                    'last_success_at' => $pollState['last_success_at'],
+                    'last_poll_at' => $pollState['last_poll_at']
+                        ? gmdate('Y-m-d\TH:i:s\Z', strtotime($pollState['last_poll_at'] . ' UTC'))
+                        : null,
+                    'last_success_at' => $pollState['last_success_at']
+                        ? gmdate('Y-m-d\TH:i:s\Z', strtotime($pollState['last_success_at'] . ' UTC'))
+                        : null,
                     'last_error' => $pollState['last_error'],
                 ];
             }

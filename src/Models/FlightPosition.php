@@ -57,7 +57,14 @@ class FlightPosition
             'SELECT * FROM flight_positions WHERE flight_id = :flight_id ORDER BY captured_at ASC'
         );
         $stmt->execute(['flight_id' => $flightId]);
-        return $stmt->fetchAll();
+        $rows = $stmt->fetchAll();
+        return array_map(static function (array $row): array {
+            if (isset($row['captured_at'])) {
+                $ts = strtotime($row['captured_at'] . ' UTC');
+                $row['captured_at'] = $ts === false ? null : gmdate('Y-m-d\TH:i:s\Z', $ts);
+            }
+            return $row;
+        }, $rows);
     }
 
     /**

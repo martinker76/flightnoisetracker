@@ -29,9 +29,9 @@ export function TooltipIcon({ text, position = 'center' }: Props) {
         shadow-lg
         opacity-0 group-hover:opacity-100
         transition-opacity duration-150
-        whitespace-nowrap z-20
+        whitespace-normal z-[1000]
         pointer-events-none
-        max-w-[260px] sm:max-w-none`}>
+        max-w-xs`}>
         {text}
       </span>
     </span>

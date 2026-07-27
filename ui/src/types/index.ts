@@ -19,10 +19,10 @@ export interface Flight {
 
 export interface FlightPosition {
   timestamp: string;
-  latitude: number;
-  longitude: number;
+  lat: number;
+  lon: number;
   altitude_m: number | null;
-  speed_knots: number | null;
+  speed_mps: number | null;
   heading: number | null;
   vertical_rate: number | null;
 }

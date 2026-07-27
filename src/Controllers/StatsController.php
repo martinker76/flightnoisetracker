@@ -260,7 +260,7 @@ class StatsController
      */
     public function noise(array $params): void
     {
-        $stats = $this->db->query(
+        $row = $this->db->query(
             'SELECT
                 MIN(estimated_db) as min_db,
                 MAX(estimated_db) as max_db,
@@ -273,6 +273,19 @@ class StatsController
                 SUM(CASE WHEN estimated_db >= 60 THEN 1 ELSE 0 END) as bucket_60_plus
              FROM flights WHERE estimated_db IS NOT NULL'
         )->fetch();
+
+        // PDO returns aggregate values as strings; cast to proper types
+        $stats = [
+            'min_db' => $row['min_db'] !== null ? round((float)$row['min_db'], 1) : null,
+            'max_db' => $row['max_db'] !== null ? round((float)$row['max_db'], 1) : null,
+            'avg_db' => $row['avg_db'] !== null ? round((float)$row['avg_db'], 1) : null,
+            'flights_with_noise' => (int)$row['flights_with_noise'],
+            'bucket_under_45' => (int)$row['bucket_under_45'],
+            'bucket_45_50' => (int)$row['bucket_45_50'],
+            'bucket_50_55' => (int)$row['bucket_50_55'],
+            'bucket_55_60' => (int)$row['bucket_55_60'],
+            'bucket_60_plus' => (int)$row['bucket_60_plus'],
+        ];
 
         $this->sendJson(['data' => $stats]);
     }

@@ -21,13 +21,19 @@ class RunwayClassifier
     private float $airportLon;
     private float $classifyMaxKm;
     private int $classifyMaxAltM;
+    private float $vieRelatedMaxKm;
+    private int $vieRelatedMaxAltM;
 
     public function __construct(array $airportConfig)
     {
         $this->airportLat = (float)$airportConfig['lat'];
         $this->airportLon = (float)$airportConfig['lon'];
-        $this->classifyMaxKm = (float)($airportConfig['runway_classify_max_km'] ?? 30);
-        $this->classifyMaxAltM = (int)($airportConfig['runway_classify_max_alt_m'] ?? 6000);
+        // Tight bounds — only positions within these get a runway stamp
+        $this->classifyMaxKm = (float)($airportConfig['runway_classify_max_km'] ?? 10);
+        $this->classifyMaxAltM = (int)($airportConfig['runway_classify_max_alt_m'] ?? 3000);
+        // Broad bounds — used only for the is_vie_related flag
+        $this->vieRelatedMaxKm = (float)($airportConfig['vie_related_max_km'] ?? 50);
+        $this->vieRelatedMaxAltM = (int)($airportConfig['vie_related_max_alt_m'] ?? 6000);
     }
 
     /**
@@ -49,7 +55,9 @@ class RunwayClassifier
             ];
         }
 
-        // Step 1: Find the position closest to the airport with lowest altitude within range
+        // Step 1: Find a position within the TIGHT (runway-classifiable) bounds.
+        // Only these get a runway stamped — anything further out is either an
+        // overflight or still too far from the airport to confirm a corridor.
         $bestPosition = null;
         $bestDistance = PHP_FLOAT_MAX;
         $bestAltitude = PHP_INT_MAX;
@@ -61,12 +69,11 @@ class RunwayClassifier
 
             $distance = $this->haversineDistance($lat, $lon, $this->airportLat, $this->airportLon);
 
-            // Only consider positions within classification range
+            // Tight bound for runway classification (typically 10 km / 3000 m)
             if ($distance > $this->classifyMaxKm) {
                 continue;
             }
 
-            // Prefer lower altitude positions (closer to approach/departure)
             // Skip positions with null altitude
             if ($alt === null) {
                 continue;
@@ -76,16 +83,20 @@ class RunwayClassifier
                 $bestAltitude = $alt;
                 $bestDistance = $distance;
                 $bestPosition = $pos;
-            } elseif ($alt !== null && $alt === $bestAltitude && $distance < $bestDistance) {
+            } elseif ($alt === $bestAltitude && $distance < $bestDistance) {
                 $bestDistance = $distance;
                 $bestPosition = $pos;
             }
         }
 
-        // No position within classification range
+        // Step 2: Determine broad VIE-related flag separately. A flight may be
+        // is_vie_related=true (in our noise area) without being close enough to
+        // stamp a specific runway.
+        $isVieRelated = $this->checkVieRelated($positions);
+
+        // No position qualifies for runway classification — leave runway UNKNOWN
+        // but keep the VIE-related flag from the broad check.
         if ($bestPosition === null) {
-            // Check if ANY position is within 50km and below 6000m for VIE-related
-            $isVieRelated = $this->checkVieRelated($positions);
             return [
                 'runway' => 'UNKNOWN',
                 'confidence' => 0.0,
@@ -97,13 +108,6 @@ class RunwayClassifier
         $heading = isset($bestPosition['heading_deg']) && $bestPosition['heading_deg'] !== null ? (float)$bestPosition['heading_deg'] : null;
         $altitude = isset($bestPosition['altitude_m']) && $bestPosition['altitude_m'] !== null ? (int)$bestPosition['altitude_m'] : null;
         $verticalRate = isset($bestPosition['vertical_rate_mps']) && $bestPosition['vertical_rate_mps'] !== null ? (float)$bestPosition['vertical_rate_mps'] : null;
-
-        // Step 2: Determine if flight is VIE-related (within 50km and below 6000m)
-        $isVieRelated = $altitude !== null && $altitude <= $this->classifyMaxAltM;
-
-        if (!$isVieRelated) {
-            $isVieRelated = $this->checkVieRelated($positions);
-        }
 
         // Step 3: Classify runway from heading
         if ($heading === null) {
@@ -238,7 +242,8 @@ class RunwayClassifier
 
     /**
      * Check if any position in the set qualifies as VIE-related.
-     * VIE-related: closest approach to LOWW within 50km AND altitude below 6000m.
+     * VIE-related: closest approach to LOWW within vie_related_max_km AND altitude below vie_related_max_alt_m.
+     * This is a BROAD check (separate from runway classification) used for noise-exposure statistics.
      */
     private function checkVieRelated(array $positions): bool
     {
@@ -249,7 +254,7 @@ class RunwayClassifier
 
             $distance = $this->haversineDistance($lat, $lon, $this->airportLat, $this->airportLon);
 
-            if ($distance <= 50 && $alt !== null && $alt <= $this->classifyMaxAltM) {
+            if ($distance <= $this->vieRelatedMaxKm && $alt !== null && $alt <= $this->vieRelatedMaxAltM) {
                 return true;
             }
         }

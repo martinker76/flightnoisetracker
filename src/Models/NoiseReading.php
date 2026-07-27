@@ -80,13 +80,19 @@ class NoiseReading
     }
 
     /**
-     * Format noise reading row: map lat/lon to latitude/longitude for frontend.
+     * Format noise reading row: map lat/lon to latitude/longitude for frontend,
+     * and emit measured_at as ISO 8601 UTC so the frontend's date-fns format()
+     * correctly converts to the user's local timezone.
      */
     private function formatNoise(array $row): array
     {
         $row['latitude'] = $row['lat'];
         $row['longitude'] = $row['lon'];
         unset($row['lat'], $row['lon']);
+        if (!empty($row['measured_at'])) {
+            $ts = strtotime($row['measured_at'] . ' UTC');
+            $row['measured_at'] = $ts === false ? null : gmdate('Y-m-d\TH:i:s\Z', $ts);
+        }
         return $row;
     }
 }

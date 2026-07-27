@@ -25,6 +25,7 @@ class OpenSkyPoller
     private Aircraft $aircraftModel;
     private RunwayClassifier $classifier;
     private OpenSkyAuth $auth;
+    private NoiseCalculator $noiseCalc;
 
     private float $minLat;
     private float $maxLat;
@@ -37,6 +38,8 @@ class OpenSkyPoller
     /** @var array<string, string|null> Cache for resolved aircraft types within a poll cycle */
     private array $aircraftTypeCache = [];
 
+    private ?bool $selDbAvailable = null;
+
     public function __construct(private array $config)
     {
         $this->db = Database::getConnection();
@@ -46,6 +49,7 @@ class OpenSkyPoller
         $this->auth = new OpenSkyAuth($config['opensky']);
 
         $this->classifier = new RunwayClassifier($config['airport']);
+        $this->noiseCalc = new NoiseCalculator($config);
 
         $box = $config['bounding_box'];
         $this->minLat = (float)$box['min_lat'];
@@ -305,6 +309,15 @@ class OpenSkyPoller
                     $this->reclassifyFlight((int)$existingFlight['id']);
                 }
 
+                // Retry aircraft type resolution if null
+                if ($existingFlight['aircraft_type'] === null) {
+                    $aircraftType = $this->resolveAircraftType($icao24);
+                    if ($aircraftType) {
+                        $stmt = $this->db->prepare('UPDATE flights SET aircraft_type = ? WHERE id = ?');
+                        $stmt->execute([$aircraftType, (int)$existingFlight['id']]);
+                    }
+                }
+
                 // Update estimated_db from closest position
                 $this->updateEstimatedDb((int)$existingFlight['id']);
             }
@@ -395,49 +408,89 @@ class OpenSkyPoller
     }
 
     /**
-     * Calculate estimated noise level (dBA) at Mannersdorf center.
-     * Uses inverse-square-law geometric spreading model.
-     */
-    private function calculateEstimatedDb(float $distanceKm, ?float $altitudeM): ?float
-    {
-        if ($altitudeM === null) {
-            return null;
-        }
-
-        $altitudeKm = $altitudeM / 1000.0;
-        $dSlant = sqrt($distanceKm * $distanceKm + $altitudeKm * $altitudeKm);
-
-        if ($dSlant <= 0) {
-            return 95.0;
-        }
-
-        // L_est = L_ref - 20 * log10(d_slant / d_ref)
-        // L_ref = 80 dBA at d_ref = 0.3 km (300 m)
-        $estimatedDb = 80.0 - 20.0 * log10($dSlant / 0.3);
-
-        return round(min(95.0, max(0.0, $estimatedDb)), 1);
-    }
-
-    /**
      * Update estimated_db on a flight based on its closest position.
+     *
+     * Uses the v1.1 noise model. Falls back to simple geometric model
+     * if the new model returns null (e.g. OVERFLIGHT).
      */
     private function updateEstimatedDb(int $flightId): void
     {
+        // Fetch closest position with all fields needed by the noise model
         $stmt = $this->db->prepare(
-            'SELECT distance_km, altitude_m FROM flight_positions
-             WHERE flight_id = ? AND distance_km IS NOT NULL
-             ORDER BY distance_km ASC LIMIT 1'
+            'SELECT fp.distance_km, fp.altitude_m, fp.speed_mps,
+                    fp.vertical_rate_mps, fp.lat, fp.lon
+             FROM flight_positions fp
+             WHERE fp.flight_id = ? AND fp.distance_km IS NOT NULL AND fp.altitude_m IS NOT NULL
+             ORDER BY fp.distance_km ASC LIMIT 1'
         );
         $stmt->execute([$flightId]);
         $pos = $stmt->fetch();
 
-        if ($pos && $pos['altitude_m'] !== null) {
-            $estDb = $this->calculateEstimatedDb((float)$pos['distance_km'], (float)$pos['altitude_m']);
-            if ($estDb !== null) {
-                $upd = $this->db->prepare('UPDATE flights SET estimated_db = ? WHERE id = ?');
-                $upd->execute([$estDb, $flightId]);
+        if (!$pos) {
+            return;
+        }
+
+        // Get flight metadata for type + VIE flag
+        $fStmt = $this->db->prepare(
+            'SELECT aircraft_type, is_vie_related FROM flights WHERE id = ?'
+        );
+        $fStmt->execute([$flightId]);
+        $flight = $fStmt->fetch();
+
+        $aircraftType = $flight['aircraft_type'] ?? null;
+        $isVie = (bool)($flight['is_vie_related'] ?? false);
+
+        // Check if any prior position had descent (for GO_AROUND heuristic)
+        $hadAppr = false;
+        if ($isVie) {
+            $haStmt = $this->db->prepare(
+                'SELECT 1 FROM flight_positions
+                 WHERE flight_id = ? AND vertical_rate_mps < -2.0
+                 LIMIT 1'
+            );
+            $haStmt->execute([$flightId]);
+            $hadAppr = (bool)$haStmt->fetch();
+        }
+
+        $position = [
+            'distance_km'        => (float)$pos['distance_km'],
+            'altitude_m'         => (float)$pos['altitude_m'],
+            'speed_mps'          => $pos['speed_mps'] !== null ? (float)$pos['speed_mps'] : null,
+            'vertical_rate_mps'  => $pos['vertical_rate_mps'] !== null ? (float)$pos['vertical_rate_mps'] : null,
+            'lat'                => $pos['lat'] !== null ? (float)$pos['lat'] : null,
+            'lon'                => $pos['lon'] !== null ? (float)$pos['lon'] : null,
+        ];
+
+        $result = $this->noiseCalc->calculate($position, $aircraftType, $isVie, $hadAppr);
+
+        if ($result['l_amax'] !== null) {
+            $upd = $this->db->prepare('UPDATE flights SET estimated_db = ? WHERE id = ?');
+            $upd->execute([$result['l_amax'], $flightId]);
+
+            if ($result['sel'] !== null && $this->hasSelDbColumn()) {
+                $selUpd = $this->db->prepare('UPDATE flights SET sel_db = ? WHERE id = ?');
+                $selUpd->execute([$result['sel'], $flightId]);
             }
         }
+    }
+
+    private function hasSelDbColumn(): bool
+    {
+        if ($this->selDbAvailable !== null) {
+            return $this->selDbAvailable;
+        }
+        $stmt = $this->db->prepare(
+            "SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = 'flights'
+               AND COLUMN_NAME = 'sel_db'"
+        );
+        $stmt->execute();
+        $this->selDbAvailable = ((int)$stmt->fetchColumn()) > 0;
+        if (!$this->selDbAvailable) {
+            error_log('[FNT] sel_db column missing — run migration 004 to enable SEL persistence');
+        }
+        return $this->selDbAvailable;
     }
 
     /**

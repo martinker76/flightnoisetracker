@@ -1,26 +1,39 @@
+# FlightNoiseTracker — Apache config
+#
+# Apache strips the per-directory prefix from the URL before matching RewriteRule
+# patterns in .htaccess. So if .htaccess lives in /flightnoisetracker/public/
+# (the resolved path of the symlink target), a request to /flightnoisetracker/api/health
+# arrives here as just `api/health`. Patterns below are RELATIVE to this directory.
+
+# Disable directory listings
+Options -Indexes
+
+# Hide dotfiles
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+# CORS + security headers
+<IfModule mod_headers.c>
+    Header always set Access-Control-Allow-Origin "*"
+    Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+    Header always set Access-Control-Allow-Headers "Origin, X-Requested-With, Content-Type, Accept, Authorization"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+</IfModule>
+
 RewriteEngine On
 
-# If it's a real file or directory, serve it directly
+# /api/* routes → PHP front controller (which strips base_path before routing)
+RewriteRule ^api/ index.php [L,QSA]
+
+# /api (no trailing slash) → front controller
+RewriteRule ^api$ index.php [L,QSA]
+
+# Static files (assets/, index.html, favicon.ico) — serve directly if they exist
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
 RewriteRule ^ - [L]
 
-# API routes go to index.php
-RewriteRule ^api/ index.php [QSA,L]
-
-# Everything else: serve index.html (SPA client-side routing)
-RewriteRule ^ index.html [QSA,L]
-
-# CORS headers for API responses
-<IfModule mod_headers.c>
-    Header set Access-Control-Allow-Origin "*"
-    Header set Access-Control-Allow-Methods "GET, POST, OPTIONS"
-    Header set Access-Control-Allow-Headers "Content-Type, Authorization"
-    Header set X-Content-Type-Options "nosniff"
-    Header set X-Frame-Options "DENY"
-    Header set X-XSS-Protection "1; mode=block"
-</IfModule>
-
-# Handle preflight OPTIONS requests
-RewriteCond %{REQUEST_METHOD} OPTIONS
-RewriteRule ^api/ index.php [R=200,L]
+# Everything else (SPA routes like /stats, /flights/99) → React shell
+RewriteRule ^ index.html [L,QSA]

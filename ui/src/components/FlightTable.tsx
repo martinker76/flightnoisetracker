@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import type { Flight, PaginationMeta } from '../types';
 import { Badge } from './Badge';
+import { TooltipIcon } from './TooltipIcon';
 import { format } from 'date-fns';
 
 interface Props {
@@ -39,16 +40,16 @@ export function FlightTable({ flights, meta, sort, order, onSort, onPage, onPerP
                 Callsign{sortIcon('callsign')}
               </th>
               <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                Aircraft
+                <span className="inline-flex items-center gap-0.5">Aircraft <TooltipIcon text="ICAO aircraft type code (e.g. B738, A320) resolved via ADSB.lol public database" /></span>
               </th>
               <th className={headerClass('icao24')} onClick={() => onSort('icao24')}>
                 ICAO24{sortIcon('icao24')}
               </th>
               <th className={headerClass('first_seen')} onClick={() => onSort('first_seen')}>
-                Enter{sortIcon('first_seen')}
+                First Seen{sortIcon('first_seen')}
               </th>
               <th className={headerClass('last_seen')} onClick={() => onSort('last_seen')}>
-                Leave{sortIcon('last_seen')}
+                Last Seen{sortIcon('last_seen')}
               </th>
               <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                 Duration
@@ -69,7 +70,7 @@ export function FlightTable({ flights, meta, sort, order, onSort, onPage, onPerP
                 Country
               </th>
               <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                Est. dB
+                <span className="inline-flex items-center gap-0.5 justify-end">Est. dB <TooltipIcon text="Estimated peak noise at Mannersdorf center based on slant distance — geometric model, not calibrated measurement" /></span>
               </th>
             </tr>
           </thead>

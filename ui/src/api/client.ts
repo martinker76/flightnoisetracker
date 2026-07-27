@@ -1,9 +1,13 @@
 import type { FlightParams, NoiseParams, NoiseCreatePayload } from '../types';
 
-// API base path — configure via VITE_API_BASE env var at build time.
-// Defaults to '/api' for dedicated-domain deployments.
-// On a subpath like /flightnoisetracker/, set VITE_API_BASE=/flightnoisetracker/api
-const BASE = import.meta.env.VITE_API_BASE ?? '/api';
+// API base path — derived from Vite's base config (BASE_URL) so API calls
+// always hit the same subpath the app is served from. With base: '/flightnoisetracker/'
+// in vite.config.ts, BASE_URL = '/flightnoisetracker/' and BASE = '/flightnoisetracker/api'.
+// IMPORTANT: must use BASE_URL (no VITE_ prefix) — Vite doesn't auto-populate VITE_API_BASE;
+// previous version used VITE_API_BASE which always fell back to '/api' and 404'd in
+// subpath deployments because Caddy's handle_path /flightnoisetracker* never matched
+// bare /api/... requests.
+const BASE = (import.meta.env.BASE_URL ?? '/') + 'api';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {

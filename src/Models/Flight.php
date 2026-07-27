@@ -38,7 +38,32 @@ class Flight
         );
         $stmt->execute(['id' => $id]);
         $result = $stmt->fetch();
-        return $result ?: null;
+        return $result ? self::normalizeFlightRow($result) : null;
+    }
+
+    /**
+     * Convert MySQL DATETIME (UTC, written by gmdate() in the poller) to ISO 8601 UTC.
+     *
+     * The API must return timestamps with an explicit timezone marker, otherwise
+     * JS `new Date("2026-07-27 12:36:01")` interprets the naive string as LOCAL
+     * time per ECMA-262 and renders the same UTC value differently in each
+     * browser timezone — which misleads users about data freshness.
+     */
+    private static function toIsoUtc(?string $dt): ?string
+    {
+        if ($dt === null || $dt === '') return null;
+        $ts = strtotime($dt . ' UTC');
+        return $ts === false ? null : gmdate('Y-m-d\TH:i:s\Z', $ts);
+    }
+
+    private static function normalizeFlightRow(array $row): array
+    {
+        foreach (['first_seen', 'last_seen'] as $f) {
+            if (array_key_exists($f, $row)) {
+                $row[$f] = self::toIsoUtc($row[$f]);
+            }
+        }
+        return $row;
     }
 
     /**
@@ -104,7 +129,7 @@ class Flight
         $stmt->execute();
 
         return [
-            'data' => $stmt->fetchAll(),
+            'data' => array_map([self::class, 'normalizeFlightRow'], $stmt->fetchAll()),
             'total' => $total,
         ];
     }

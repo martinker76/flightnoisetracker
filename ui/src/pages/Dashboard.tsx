@@ -83,7 +83,7 @@ export default function Dashboard() {
                     </th>
                     <th className="text-left py-2 px-2 text-slate-500">
                       <span className="inline-flex items-center gap-0.5">
-                        Aircraft <TooltipIcon text={TOOLTIPS.aircraft} />
+                        Aircraft <TooltipIcon text={TOOLTIPS.aircraft} position="right" />
                       </span>
                     </th>
                     <th className="text-left py-2 px-2 text-slate-500">
@@ -114,8 +114,8 @@ export default function Dashboard() {
                       <td className="py-2 px-2">
                         <Link to={`/flights/${f.id}`} className="text-blue-600 dark:text-blue-400 hover:underline font-mono">
                           {f.callsign || f.icao24}
+                          {f.is_vie_related && <Badge variant="blue" className="ml-1">VIE</Badge>}
                         </Link>
-                        {f.is_vie_related && <Badge variant="blue" className="ml-1">VIE</Badge>}
                       </td>
                       <td className="py-2 px-2 font-mono text-xs">
                         {f.aircraft_type || '—'}
