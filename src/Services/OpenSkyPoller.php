@@ -360,8 +360,15 @@ class OpenSkyPoller
     private function reclassifyFlight(int $flightId): void
     {
         $positions = $this->positionModel->findByFlightId($flightId);
-        if (count($positions) < 3) {
-            return; // Need at least 3 points for meaningful classification
+        // Most flights in our dataset have only 1-2 position samples (OpenSky
+        // /states/all returns the latest state per flight, so we don't accumulate
+        // track points unless the flight lingers in our bounding box). Requiring
+        // 3 positions meant ~98% of UNKNOWN-low-vie flights were never reclassified,
+        // so the wrong (UNKNOWN) stamp persisted. Drop to 1 — with 1 position we
+        // still have the lowest-altitude point within bounds, which is enough for
+        // the heading-based classifier + heuristic fallback to produce a runway.
+        if (count($positions) < 1) {
+            return;
         }
 
         $classification = $this->classifier->classify($positions);

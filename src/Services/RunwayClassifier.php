@@ -122,6 +122,20 @@ class RunwayClassifier
         $runway = $this->classifyRunwayFromHeading($heading);
         $confidence = $this->calculateConfidence($heading, $altitude, $bestDistance);
 
+        // Step 3.5: Heuristic fallback for "mid-turn" flights.
+        // When heading falls in the gap between runway buckets (20-80° or 200-260°),
+        // the flight is most likely a 16/34 arrival/departure captured mid-turn
+        // (LOWW uses 16/34 ~93% of the time when classifiable). If the flight is
+        // VIE-related and at low altitude (i.e., clearly on approach/departure,
+        // not a high-altitude overflight), default to the dominant runway with
+        // reduced confidence to reflect the heuristic nature of the call.
+        // This fixes ~9 flights/day that are correctly in our noise area but
+        // happen to be sampled during their turn to/from runway alignment.
+        if ($runway === 'UNKNOWN' && $isVieRelated && $altitude !== null && $altitude < 3000) {
+            $runway = '16/34';
+            $confidence = max(0.5, $confidence * 0.7);
+        }
+
         // Step 4: Determine approach/departure type
         $approachType = $this->determineApproachType($verticalRate, $heading, $bestPosition, $positions);
 
