@@ -300,8 +300,16 @@ function TechnicalNotesSection() {
         <li>Built with PHP 8.3, MariaDB 10.11, and React 18.</li>
         <li>Live flight data is polled from OpenSky every 60 seconds.</li>
         <li>
-          The bounding box, airport coordinates, and classification parameters are configured
-          server-side and can be adjusted without rebuilding the frontend.
+          Please access the project repo for further details:{' '}
+          <a
+            href="https://github.com/martinker76/flightnoisetracker"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            github.com/martinker76/flightnoisetracker
+          </a>
+          .
         </li>
         <li>This is a public, open-access application (no login required).</li>
       </ul>
