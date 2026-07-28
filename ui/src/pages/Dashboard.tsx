@@ -97,6 +97,11 @@ export default function Dashboard() {
                     </th>
                     <th className="text-right py-2 px-2 text-slate-500">
                       <span className="inline-flex items-center gap-0.5">
+                        Alt <TooltipIcon text={TOOLTIPS.alt} />
+                      </span>
+                    </th>
+                    <th className="text-right py-2 px-2 text-slate-500">
+                      <span className="inline-flex items-center gap-0.5">
                         Closest <TooltipIcon text={TOOLTIPS.closest} position="right" />
                       </span>
                     </th>
@@ -125,6 +130,7 @@ export default function Dashboard() {
                       <td className="py-2 px-2">
                         <RunwayCell runway={f.runway_used} isVieRelated={f.is_vie_related} />
                       </td>
+                      <td className="py-2 px-2 text-right">{f.max_altitude_m ? `${f.max_altitude_m} m` : '—'}</td>
                       <td className="py-2 px-2 text-right font-mono" title="Closest approach to Mannersdorf center">
                         {f.closest_distance_km != null ? `${Number(f.closest_distance_km).toFixed(1)} km` : '—'}
                       </td>
