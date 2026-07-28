@@ -55,6 +55,26 @@ class ContactController
         );
         // Allow override via env / config; defaults to the constant.
         $this->configInbox = $config['contact']['inbox_email'] ?? self::INBOX_EMAIL;
+
+        // Inject SMTP relay credentials as env vars at construction time, so
+        // PHPMailer (which calls getenv()) sees them. This is the runtime
+        // fallback when the PHP-FPM pool doesn't have FNT_SMTP_* set.
+        // Source order: existing env wins (panel/Plesk), config fills gaps.
+        $smtp = $config['smtp'] ?? [];
+        $smtpMap = [
+            'FNT_SMTP_HOST'      => $smtp['host']         ?? null,
+            'FNT_SMTP_PORT'      => $smtp['port']         ?? null,
+            'FNT_SMTP_USERNAME'  => $smtp['username']     ?? null,
+            'FNT_SMTP_PASSWORD'  => $smtp['password']     ?? null,
+            'FNT_SMTP_FROM_ADDR' => $smtp['from_address'] ?? null,
+            'FNT_SMTP_FROM_NAME' => $smtp['from_name']     ?? null,
+        ];
+        foreach ($smtpMap as $name => $value) {
+            if ($value !== null && $value !== '' && getenv($name) === false) {
+                putenv("{$name}={$value}");
+                $_ENV[$name] = $value;
+            }
+        }
     }
 
     /**
