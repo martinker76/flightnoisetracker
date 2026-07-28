@@ -3,34 +3,56 @@
 declare(strict_types=1);
 
 /**
- * FlightNoiseTracker — Historical Backfill Script (v3)
+ * FlightNoiseTracker — Historical Backfill Script (v4)
  *
  * Backfills flight data from OpenSky Network's historical API.
  *
  * Strategy:
- *   1. Fetch LOWW arrivals/departures for the date range
- *   2. Pre-filter flights based on departure/arrival airport ICAO code
- *      — flights to/from Western/Northern Europe are unlikely to cross
- *        Mannersdorf and are skipped, saving track API credits
- *   3. For remaining candidate flights, fetch their tracks (parallel)
- *   4. Filter tracks by actual Mannersdorf bounding box, insert matches
+ *   1. Fetch LOWW arrivals/departures for the date range using STRICT
+ *      2-day windows (each window spans exactly 2 calendar days to stay
+ *      within OpenSky's "max 2 partitions" rule).
+ *   2. Throttle /flights/* requests (1/sec by default) to avoid burst
+ *      rate-limiting. Honors X-Rate-Limit-Retry-After-Seconds on 429.
+ *   3. Pre-filter flights by origin/destination region (western and
+ *      northern European airports rarely cross Mannersdorf).
+ *   4. For candidate flights, fetch their tracks in parallel (lower
+ *      concurrency by default, with throttle between batches). Track
+ *      endpoint has its own credit bucket.
+ *   5. Filter tracks by Mannersdorf bounding box, insert matches.
  *
  * Usage:
  *   php cron/backfill.php
  *   php cron/backfill.php --days 30
  *   php cron/backfill.php --start 2026-07-01 --end 2026-07-14
  *   php cron/backfill.php --dry-run
- *   php cron/backfill.php --skip-flights   (if already have flight list cached)
+ *   php cron/backfill.php --skip-flights
  *
  * Options:
- *   --days N       Backfill the last N days (default: 7)
- *   --start YYYY-MM-DD  Start date (overrides --days)
- *   --end YYYY-MM-DD    End date (overrides --days)
- *   --dry-run      Query and report without inserting
- *   --concurrency N     Parallel track requests (default: 8)
- *   --skip-flights     Skip Step 1 (fetch flights), only process tracks
- *   --refresh-stats    Rebuild daily_stats after backfill
- *   --max-tracks N     Maximum track queries (credit budget guard)
+ *   --days N                Backfill the last N days (default: 7)
+ *   --start YYYY-MM-DD      Start date (overrides --days)
+ *   --end YYYY-MM-DD        End date (overrides --days)
+ *   --dry-run               Query and report without inserting
+ *   --concurrency N         Parallel track requests per batch (default: 4)
+ *   --request-delay-ms N    Delay between /flights/* requests and between
+ *                           track batches, in milliseconds (default: 1000)
+ *   --skip-flights          Skip Step 1 (fetch flights), only process tracks
+ *   --refresh-stats         Rebuild daily_stats after backfill
+ *   --max-tracks N          Maximum track queries (credit budget guard,
+ *                           default: 2000 — well within the 4000/day bucket)
+ *
+ * OpenSky API rules (relevant here):
+ *   - /flights/* and /tracks/* are billed per CALENDAR-DAY partition
+ *     crossed by the time range. 1–2 days = 30 credits, 3–10 days = 60*N
+ *     credits, 11–15 days = 120*N, etc.
+ *   - /flights/* endpoints reject (HTTP 400) any request that spans
+ *     3+ partitions. So each request MUST stay within exactly 2 calendar
+ *     days. Day-aligning start/end is the safe way to guarantee this.
+ *   - /tracks/* returns 404 if no track is found (not an error).
+ *   - On rate limit exhaustion, server returns 429 + X-Rate-Limit-
+ *     Retry-After-Seconds. Backoff that long, then retry.
+ *
+ *   - /flights/* and /tracks/* have INDEPENDENT credit buckets.
+ *     Spending one does not affect the other.
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -50,25 +72,42 @@ use App\Services\RunwayClassifier;
 use App\Config\Database;
 
 // ─── Parse CLI options ────────────────────────────────────────────────
-$opts = getopt('', ['days:', 'start:', 'end:', 'dry-run', 'concurrency:', 'skip-flights', 'refresh-stats', 'max-tracks:']);
+$opts = getopt('', ['days:', 'start:', 'end:', 'dry-run', 'concurrency:', 'skip-flights', 'refresh-stats', 'max-tracks:', 'request-delay-ms:']);
 $dryRun = isset($opts['dry-run']);
 $skipFlights = isset($opts['skip-flights']);
 $refreshStats = isset($opts['refresh-stats']);
-$maxConcurrent = isset($opts['concurrency']) ? max(1, min(20, (int)$opts['concurrency'])) : 8;
-$maxTracks = isset($opts['max-tracks']) ? (int)$opts['max-tracks'] : 2000; // stay well within 4000/daily
+$maxConcurrent = isset($opts['concurrency']) ? max(1, min(20, (int)$opts['concurrency'])) : 4;
+$maxTracks = isset($opts['max-tracks']) ? (int)$opts['max-tracks'] : 2000;
+$requestDelayMs = isset($opts['request-delay-ms']) ? max(0, (int)$opts['request-delay-ms']) : 1000;
 
-$endTs = isset($opts['end']) ? strtotime($opts['end'] . ' 23:59:59') : time();
-if (isset($opts['start'])) {
-    $startTs = strtotime($opts['start'] . ' 00:00:00');
+// Determine the time range. Days are computed from `end - days`, then
+// the start is snapped to the START of that calendar day (UTC), and the
+// end is the CURRENT moment (or the end of the --end date).
+//
+// All --start / --end inputs are interpreted in UTC. The strtotime()
+// calls below always include an explicit UTC suffix so the result is
+// timezone-independent (the server itself may be in CEST/AEST/etc.).
+if (isset($opts['end'])) {
+    $endTs = strtotime($opts['end'] . ' 23:59:59 UTC');
 } else {
-    $days = isset($opts['days']) ? max(1, (int)$opts['days']) : 7;
-    $startTs = $endTs - ($days * 86400);
+    $endTs = time();
 }
 
-echo "FlightNoiseTracker — Historical Backfill v3\n";
+if (isset($opts['start'])) {
+    $startTs = strtotime($opts['start'] . ' 00:00:00 UTC');
+} else {
+    $days = isset($opts['days']) ? max(1, (int)$opts['days']) : 7;
+    // Snap start to the start of the day N days ago, in UTC.
+    $endDate = gmdate('Y-m-d', $endTs);
+    $startDate = gmdate('Y-m-d', strtotime("-{$days} days", strtotime($endDate . ' 00:00:00 UTC')));
+    $startTs = strtotime($startDate . ' 00:00:00 UTC');
+}
+
+echo "FlightNoiseTracker — Historical Backfill v4\n";
 echo "=============================================\n";
-echo "Date range: " . gmdate('Y-m-d', $startTs) . " to " . gmdate('Y-m-d', $endTs) . "\n";
-echo "Concurrency: {$maxConcurrent}\n";
+echo "Date range: " . gmdate('Y-m-d H:i:s', $startTs) . " → " . gmdate('Y-m-d H:i:s', $endTs) . " UTC\n";
+echo "Concurrency (track): {$maxConcurrent}\n";
+echo "Request delay: " . ($requestDelayMs / 1000) . " s between /flights/* calls and track batches\n";
 echo "Max track queries: {$maxTracks}\n";
 if ($dryRun) echo "Mode: DRY RUN (no inserts)\n";
 if ($skipFlights) echo "Skip Step 1: loading flights from DB only\n";
@@ -159,48 +198,94 @@ function shouldCheckFlight(array $flight): bool {
 }
 
 /**
- * Parse a single API response from OpenSky, returns decoded body or null.
+ * Sleep for the given milliseconds. Used for throttling.
  */
-function apiGet(string $url, OpenSkyAuth $auth): ?array {
+function throttle(int $ms): void {
+    if ($ms > 0) usleep($ms * 1000);
+}
+
+/**
+ * Issue a single GET request, returning structured result with headers.
+ *
+ * Honors 429 + X-Rate-Limit-Retry-After-Seconds by waiting that long
+ * and retrying once. Other 4xx/5xx are returned as-is.
+ */
+function apiGet(string $url, OpenSkyAuth $auth, int $throttleMs, string $label = ''): ?array {
     $headers = $auth->headers();
     if (empty($headers)) return null;
 
-    $ch = curl_init();
-    curl_setopt_array($ch, [
-        CURLOPT_URL => $url,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 30,
-        CURLOPT_CONNECTTIMEOUT => 10,
-        CURLOPT_HTTPHEADER => $headers,
-        CURLOPT_HEADER => true,
-    ]);
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-    $error = curl_error($ch);
-    curl_close($ch);
+    for ($attempt = 0; $attempt < 2; $attempt++) {
+        throttle($throttleMs); // throttle BEFORE each request (including first)
 
-    if ($response === false) { fwrite(STDERR, "  curl error: {$error}\n"); return null; }
-    $body = substr($response, $headerSize);
-    $headersStr = substr($response, 0, $headerSize);
-    $creditsRemaining = null;
-    preg_match('/X-Rate-Limit-Remaining:\s*(\d+)/i', $headersStr, $m);
-    if (!empty($m[1])) $creditsRemaining = (int)$m[1];
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_HEADER => true,
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+        $error = curl_error($ch);
+        $elapsedMs = (int)round(curl_getinfo($ch, CURLINFO_TOTAL_TIME) * 1000);
+        curl_close($ch);
 
-    return ['code' => $httpCode, 'body' => $body, 'credits_remaining' => $creditsRemaining];
+        if ($response === false) {
+            fwrite(STDERR, "  [{$label}] curl error: {$error}\n");
+            return null;
+        }
+        $body = substr($response, $headerSize);
+        $headersStr = substr($response, 0, $headerSize);
+
+        $creditsRemaining = null;
+        $retryAfter = null;
+        if (preg_match('/X-Rate-Limit-Remaining:\s*(\d+)/i', $headersStr, $m)) {
+            $creditsRemaining = (int)$m[1];
+        }
+        if (preg_match('/X-Rate-Limit-Retry-After-Seconds:\s*(\d+)/i', $headersStr, $m)) {
+            $retryAfter = (int)$m[1];
+        }
+
+        // Handle 429 with server-supplied backoff
+        if ($httpCode === 429 && $retryAfter !== null && $attempt === 0) {
+            $wait = max(1, $retryAfter);
+            fwrite(STDERR, "  [{$label}] HTTP 429 — backing off {$wait}s (per server)\n");
+            sleep($wait);
+            continue;
+        }
+
+        return [
+            'code' => $httpCode,
+            'body' => $body,
+            'credits_remaining' => $creditsRemaining,
+            'elapsed_ms' => $elapsedMs,
+        ];
+    }
+
+    return null;
 }
 
 /**
  * Fetch multiple URLs in parallel via curl_multi.
+ *
+ * Tracks remaining credits across the batch (each track response
+ * carries its own X-Rate-Limit-Remaining header). If a response is
+ * 429 + Retry-After, we pause the batch and retry after the wait.
  */
-function apiGetParallel(array $urls, OpenSkyAuth $auth, int $maxConcurrent): array {
+function apiGetParallel(array $urls, OpenSkyAuth $auth, int $maxConcurrent, int $throttleMs, string $label = 'tracks'): array {
     $headers = $auth->headers();
     if (empty($headers)) return array_fill(0, count($urls), null);
 
     $results = [];
     $chunks = array_chunk($urls, $maxConcurrent, true);
 
-    foreach ($chunks as $chunk) {
+    foreach ($chunks as $chunkIdx => $chunk) {
+        // Throttle between batches (not before the very first batch).
+        if ($chunkIdx > 0) throttle($throttleMs);
+
         $mcurl = curl_multi_init();
         $handles = [];
 
@@ -224,34 +309,50 @@ function apiGetParallel(array $urls, OpenSkyAuth $auth, int $maxConcurrent): arr
             curl_multi_select($mcurl, 0.5);
         } while ($running > 0);
 
+        $sawRetryAfter = null;
         foreach ($handles as $i => $ch) {
             $response = curl_multi_getcontent($ch);
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
             $error = curl_error($ch);
+            $elapsedMs = (int)round(curl_getinfo($ch, CURLINFO_TOTAL_TIME) * 1000);
 
             if ($response === false || !empty($error)) {
-                fwrite(STDERR, "  [parallel] curl error: {$error}\n");
                 $results[$i] = null;
-            } else {
-                $body = substr($response, $headerSize);
-                $headersStr = substr($response, 0, $headerSize);
-                $creditsRemaining = null;
-                preg_match('/X-Rate-Limit-Remaining:\s*(\d+)/i', $headersStr, $m);
-                if (!empty($m[1])) $creditsRemaining = (int)$m[1];
-
-                $results[$i] = [
-                    'code' => $httpCode,
-                    'body' => $body,
-                    'credits_remaining' => $creditsRemaining,
-                ];
+                continue;
             }
+            $body = substr($response, $headerSize);
+            $headersStr = substr($response, 0, $headerSize);
+            $creditsRemaining = null;
+            $retryAfter = null;
+            if (preg_match('/X-Rate-Limit-Remaining:\s*(\d+)/i', $headersStr, $m)) {
+                $creditsRemaining = (int)$m[1];
+            }
+            if (preg_match('/X-Rate-Limit-Retry-After-Seconds:\s*(\d+)/i', $headersStr, $m)) {
+                $retryAfter = (int)$m[1];
+            }
+
+            if ($httpCode === 429 && $retryAfter !== null) {
+                $sawRetryAfter = max($sawRetryAfter ?? 0, $retryAfter);
+            }
+
+            $results[$i] = [
+                'code' => $httpCode,
+                'body' => $body,
+                'credits_remaining' => $creditsRemaining,
+                'elapsed_ms' => $elapsedMs,
+            ];
 
             curl_multi_remove_handle($mcurl, $ch);
             curl_close($ch);
         }
 
         curl_multi_close($mcurl);
+
+        if ($sawRetryAfter !== null) {
+            fwrite(STDERR, "  [{$label}] batch hit 429 — backing off {$sawRetryAfter}s\n");
+            sleep(max(1, $sawRetryAfter));
+        }
     }
 
     return $results;
@@ -272,6 +373,7 @@ $stats = [
     'skipped_dup' => 0,
     'skip_no_track' => 0,
     'errors' => 0,
+    'http_400' => 0,
 ];
 
 // ─── 1. Fetch flights arriving at/departing from LOWW ────────────────
@@ -294,7 +396,6 @@ if ($skipFlights) {
         'start' => gmdate('Y-m-d H:i:s', $startTs),
         'end' => gmdate('Y-m-d H:i:s', $endTs),
     ]);
-    // We store pseudo-flight data for track fetching
     foreach ($stmt->fetchAll() as $row) {
         $key = $row['icao24'] . '_' . strtotime($row['first_seen']);
         $fetchedFlights[$key] = [
@@ -307,42 +408,71 @@ if ($skipFlights) {
             'estArrivalAirport' => null,
         ];
     }
-    echo "  {$stats['flights_found']} flights without positions found.\n\n";
+    echo "  " . count($fetchedFlights) . " flights without positions found.\n\n";
 } else {
-    echo "Step 1: Fetching LOWW flights from OpenSky...\n";
+    echo "Step 1: Fetching LOWW flights from OpenSky (day-aligned 2-day windows)...\n";
 
-    for ($windowStart = max($startTs, $endTs - 86400 * 30); $windowStart < $endTs; $windowStart += 86400 * 2) {
-        $windowEnd = min($windowStart + 86400 * 2 - 1, $endTs);
-        if ($windowEnd <= $windowStart) break;
+    // Build a list of 2-day windows. Each window starts at the start of
+    // a calendar day (UTC) and ends at the end of the NEXT calendar day
+    // (so it spans exactly 2 calendar day partitions — the maximum the
+    // /flights/* endpoints will accept).
+    $windows = [];
+    $winStart = $startTs;
+    while ($winStart < $endTs) {
+        $winEnd = min($winStart + 86400 * 2 - 1, $endTs);
+        if ($winEnd <= $winStart) break;
+        $windows[] = [$winStart, $winEnd];
+        $winStart += 86400 * 2;
+    }
 
+    echo "  Total windows: " . count($windows)
+        . " (" . (count($windows) * 2) . " calendar days, "
+        . "~" . (count($windows) * 60) . " credits for /flights/*)\n";
+
+    foreach ($windows as [$windowStart, $windowEnd]) {
         foreach (['arrival', 'departure'] as $type) {
-            if ($type === 'departure' && ($windowEnd - $windowStart) < 86400 * 2 + 1) {
-                // Departure endpoint requires >2 days
-                $depWindowEnd = min($windowStart + 86400 * 3 - 1, $endTs);
-                if ($depWindowEnd - $windowStart < 86400 * 2 + 1) continue;
-                $url = "https://opensky-network.org/api/flights/departure?airport=LOWW&begin={$windowStart}&end={$depWindowEnd}";
-            } else {
-                $url = "https://opensky-network.org/api/flights/{$type}?airport=LOWW&begin={$windowStart}&end={$windowEnd}";
-            }
+            $url = sprintf(
+                'https://opensky-network.org/api/flights/%s?airport=LOWW&begin=%d&end=%d',
+                $type,
+                $windowStart,
+                $windowEnd
+            );
 
             $stats['api_calls']++;
-            echo "  {$type}s " . gmdate('Y-m-d', $windowStart) . "→" . gmdate('Y-m-d', $windowEnd) . " ... ";
-            $result = apiGet($url, $auth);
+            echo "  {$type}s "
+                . gmdate('Y-m-d', $windowStart) . "→" . gmdate('Y-m-d', $windowEnd)
+                . " (UTC) ... ";
 
-            if ($result === null || $result['code'] === 404) {
+            $result = apiGet($url, $auth, $requestDelayMs, "{$type}");
+
+            if ($result === null) {
+                echo "transport error\n";
+                continue;
+            }
+            if ($result['code'] === 404) {
                 echo "no data\n";
                 continue;
             }
+            if ($result['code'] === 400) {
+                echo "HTTP 400 (window logic bug — should not happen)\n";
+                fwrite(STDERR, "    body: " . substr($result['body'], 0, 200) . "\n");
+                $stats['http_400']++;
+                continue;
+            }
             if ($result['code'] !== 200) {
-                echo "HTTP {$result['code']}: " . substr($result['body'], 0, 100) . "\n";
+                echo "HTTP {$result['code']}\n";
                 continue;
             }
 
             $flights = json_decode($result['body'], true);
-            if (!is_array($flights)) { echo "invalid\n"; continue; }
+            if (!is_array($flights)) {
+                echo "invalid JSON\n";
+                continue;
+            }
 
-            $cr = $result['credits_remaining'] !== null ? " (rem: {$result['credits_remaining']})" : '';
-            echo count($flights) . " flights{$cr}\n";
+            $cr = $result['credits_remaining'] !== null ? " (credits: {$result['credits_remaining']})" : '';
+            $ms = $result['elapsed_ms'];
+            echo count($flights) . " flights, {$ms}ms{$cr}\n";
             $stats['credits_used'] += 30;
 
             foreach ($flights as $f) {
@@ -375,7 +505,8 @@ foreach ($fetchedFlights as $key => $flight) {
 }
 
 echo "  Candidates: {$stats['prefilter_passed']} (skipped {$stats['prefilter_skipped']} western/northern)\n";
-echo "  Ratio: " . ($stats['flights_found'] > 0 ? round($stats['prefilter_passed'] / $stats['flights_found'] * 100, 1) . '%' : 'N/A') . "\n\n";
+echo "  Ratio: " . ($stats['flights_found'] > 0 ? round($stats['prefilter_passed'] / $stats['flights_found'] * 100, 1) . '%' : 'N/A') . "\n";
+echo "  Estimated track cost: " . min(count($candidateFlights), $maxTracks) * 4 . " credits\n\n";
 
 if (empty($candidateFlights)) {
     echo "No candidate flights after pre-filter. Nothing to do.\n";
@@ -383,7 +514,7 @@ if (empty($candidateFlights)) {
 }
 
 // ─── 3. Batch-fetch tracks in parallel (credit-budget aware) ─────────
-echo "Step 3: Fetching tracks (parallel, {$maxConcurrent} concurrent, max {$maxTracks} queries)...\n";
+echo "Step 3: Fetching tracks (parallel {$maxConcurrent}, max {$maxTracks} queries)...\n";
 
 $candidateKeys = array_keys($candidateFlights);
 
@@ -404,9 +535,11 @@ foreach ($candidateKeys as $idx => $key) {
     $trackMap[$idx] = $key;
 }
 
-echo "  Fetching " . count($trackUrls) . " tracks...\n";
+echo "  Fetching " . count($trackUrls) . " tracks ("
+    . (int)ceil(count($trackUrls) / $maxConcurrent) . " batches × "
+    . ($requestDelayMs / 1000) . "s delay)...\n";
 $t0 = microtime(true);
-$trackResults = apiGetParallel($trackUrls, $auth, $maxConcurrent);
+$trackResults = apiGetParallel($trackUrls, $auth, $maxConcurrent, $requestDelayMs, 'tracks');
 $elapsed = round(microtime(true) - $t0, 1);
 
 echo "  Done in {$elapsed}s\n";
@@ -439,7 +572,6 @@ foreach ($trackResults as $idx => $result) {
     $stats['tracks_fetched']++;
     $stats['credits_used'] += 4;
 
-    // Report credits status from last result
     if ($result['credits_remaining'] !== null) {
         $stats['credits_remaining'] = $result['credits_remaining'];
     }
@@ -620,9 +752,10 @@ echo "  Skipped (duplicate):       {$stats['skipped_dup']}\n";
 echo "  Track errors/no-data:      {$stats['track_errors']}/{$stats['skip_no_track']}\n";
 echo "  Errors:                    {$stats['errors']}\n";
 echo "  API calls:                 {$stats['api_calls']}\n";
+echo "  /flights/* 400 errors:     {$stats['http_400']} (should be 0)\n";
 echo "  Credits used (approx):     {$stats['credits_used']}\n";
 if (isset($stats['credits_remaining'])) {
-    echo "  Credits remaining:         {$stats['credits_remaining']}\n";
+    echo "  Credits remaining (last):  {$stats['credits_remaining']}\n";
 }
 
 // ─── 6. Refresh daily stats ──────────────────────────────────────────

@@ -4,6 +4,7 @@ import { FlightTrack } from '../components/FlightTrack';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorAlert } from '../components/ErrorAlert';
 import { Badge } from '../components/Badge';
+import { RunwayCell } from '../components/RunwayCell';
 import { format } from 'date-fns';
 
 export default function FlightDetail() {
@@ -51,11 +52,7 @@ export default function FlightDetail() {
           </div>
           <div>
             <p className="text-xs text-slate-500">Runway</p>
-            <p>
-              {f.runway_used === '11/29' && <Badge variant="blue">11/29</Badge>}
-              {f.runway_used === '16/34' && <Badge variant="green">16/34</Badge>}
-              {(!f.runway_used || f.runway_used === 'UNKNOWN') && <Badge variant="gray">UNKNOWN</Badge>}
-            </p>
+            <p><RunwayCell runway={f.runway_used} isVieRelated={f.is_vie_related} /></p>
           </div>
           <div>
             <p className="text-xs text-slate-500">Entering Airspace</p>

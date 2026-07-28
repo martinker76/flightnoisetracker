@@ -125,6 +125,17 @@ class RunwayClassifier
         // Step 4: Determine approach/departure type
         $approachType = $this->determineApproachType($verticalRate, $heading, $bestPosition, $positions);
 
+        // Step 5: Enforce invariant. If a flight is NOT VIE-related (no noise-relevant
+        // approach), it should never have a runway stamp. The classification can
+        // produce a concrete runway from a high-altitude position that briefly comes
+        // within 10 km of LOWW, but that's an overflight (e.g., at 7000 m) and the
+        // runway stamp is misleading. Clear it.
+        // Invariant: runway_used != 'UNKNOWN' IMPLIES is_vie_related = true.
+        if (!$isVieRelated && $runway !== 'UNKNOWN') {
+            $runway = 'UNKNOWN';
+            $confidence = 0.0;
+        }
+
         return [
             'runway' => $runway,
             'confidence' => $confidence,

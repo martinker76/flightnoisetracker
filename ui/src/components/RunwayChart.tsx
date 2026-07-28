@@ -12,7 +12,9 @@ interface Props {
 
 export function RunwayChart({ runway_11_29, runway_16_34, runway_unknown }: Props) {
   const data = {
-    labels: ['11/29', '16/34', 'UNKNOWN'],
+    // 'VIE UNK' = VIE-related flight that couldn't be classified to a specific runway.
+    // Overflights are NOT included here — they have their own bucket in the StatsCard row.
+    labels: ['11/29', '16/34', 'VIE UNK'],
     datasets: [
       {
         data: [runway_11_29, runway_16_34, runway_unknown],
@@ -35,7 +37,7 @@ export function RunwayChart({ runway_11_29, runway_16_34, runway_unknown }: Prop
     <div className="card">
       <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
         <span className="inline-flex items-center gap-1">
-          Runway Distribution <TooltipIcon text="Distribution of flights by runway configuration for today" />
+          Runway Distribution <TooltipIcon text="VIE-related flights by runway configuration. 'VIE UNK' = VIE-related flight that couldn't be classified to a specific runway. Overflights are not included here — see Overflights card." />
         </span>
       </h3>
       <div className="h-56">

@@ -24,7 +24,9 @@ export function RunwayBarChart({ data }: Props) {
         backgroundColor: '#22c55e',
       },
       {
-        label: 'UNKNOWN',
+        // VIE-related but unclassified. Overflights are tracked separately and
+        // not stacked here — see the 'Overflights' row in the StatsCard summary.
+        label: 'VIE UNK',
         data: data.map((d) => d.runway_unknown),
         backgroundColor: '#94a3b8',
       },

@@ -348,6 +348,14 @@ class OpenSkyPoller
 
     /**
      * Re-classify a flight when more position data becomes available.
+     *
+     * Previously the UPDATE was conditional on finding a runway stamp (only
+     * committed the row if the new runway was concrete). That left stale
+     * `runway_used = '11/29'` on flights that turned out to be overflights.
+     * Fix: always update the row with the latest classification, so the
+     * invariant "runway_used != 'UNKNOWN' IMPLIES is_vie_related = true"
+     * is also enforced retroactively (the classifier now blanks the runway
+     * when is_vie_related is false).
      */
     private function reclassifyFlight(int $flightId): void
     {
@@ -358,14 +366,12 @@ class OpenSkyPoller
 
         $classification = $this->classifier->classify($positions);
 
-        if ($classification['runway'] !== 'UNKNOWN') {
-            $this->flightModel->updateClassification(
-                $flightId,
-                $classification['is_vie_related'],
-                $classification['runway'],
-                $classification['confidence']
-            );
-        }
+        $this->flightModel->updateClassification(
+            $flightId,
+            $classification['is_vie_related'],
+            $classification['runway'],
+            $classification['confidence']
+        );
     }
 
     /**

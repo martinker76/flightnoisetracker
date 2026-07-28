@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import type { Flight, PaginationMeta } from '../types';
 import { Badge } from './Badge';
+import { RunwayCell } from './RunwayCell';
 import { TooltipIcon } from './TooltipIcon';
 import { format } from 'date-fns';
 
@@ -12,13 +13,6 @@ interface Props {
   onSort: (col: string) => void;
   onPage: (page: number) => void;
   onPerPage: (perPage: number) => void;
-}
-
-function RunwayBadge({ runway }: { runway: string | null }) {
-  if (!runway) return <Badge variant="gray">N/A</Badge>;
-  if (runway === '11/29') return <Badge variant="blue">11/29</Badge>;
-  if (runway === '16/34') return <Badge variant="green">16/34</Badge>;
-  return <Badge variant="gray">UNKNOWN</Badge>;
 }
 
 export function FlightTable({ flights, meta, sort, order, onSort, onPage, onPerPage }: Props) {
@@ -106,7 +100,7 @@ export function FlightTable({ flights, meta, sort, order, onSort, onPage, onPerP
                   <td className="px-3 py-2 text-sm text-right font-mono" title="Closest approach to Mannersdorf center">
                     {f.closest_distance_km != null ? `${Number(f.closest_distance_km).toFixed(1)} km` : '—'}
                   </td>
-                  <td className="px-3 py-2"><RunwayBadge runway={f.runway_used} /></td>
+                  <td className="px-3 py-2"><RunwayCell runway={f.runway_used} isVieRelated={f.is_vie_related} /></td>
                   <td className="px-3 py-2">
                     {f.is_vie_related && <Badge variant="blue">VIE</Badge>}
                   </td>

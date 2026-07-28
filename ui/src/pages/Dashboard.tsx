@@ -7,6 +7,7 @@ import { MapView } from '../components/MapView';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorAlert } from '../components/ErrorAlert';
 import { Badge } from '../components/Badge';
+import { RunwayCell } from '../components/RunwayCell';
 import { TooltipIcon } from '../components/TooltipIcon';
 import { format } from 'date-fns';
 
@@ -64,16 +65,14 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Map + Recent flights */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <MapView height="350px" recentFlights={recent.data?.data} />
-
-        <div className="card">
+      {/* Recent Flights (wider, left) + Map (smaller, right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="card lg:col-span-2">
           <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Recent Flights</h3>
           {recent.isLoading ? (
             <LoadingSpinner className="p-4" />
           ) : (
-            <table className="w-full text-sm">
+            <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-slate-700">
                     <th className="text-left py-2 px-2 text-slate-500">
@@ -98,7 +97,7 @@ export default function Dashboard() {
                     </th>
                     <th className="text-right py-2 px-2 text-slate-500">
                       <span className="inline-flex items-center gap-0.5">
-                        Alt <TooltipIcon text={TOOLTIPS.alt} />
+                        Closest <TooltipIcon text={TOOLTIPS.closest} position="right" />
                       </span>
                     </th>
                     <th className="text-right py-2 px-2 text-slate-500">
@@ -117,19 +116,19 @@ export default function Dashboard() {
                           {f.is_vie_related && <Badge variant="blue" className="ml-1">VIE</Badge>}
                         </Link>
                       </td>
-                      <td className="py-2 px-2 font-mono text-xs">
+                      <td className="py-2 px-2 font-mono">
                         {f.aircraft_type || '—'}
                       </td>
-                      <td className="py-2 px-2 text-xs text-slate-500">
+                      <td className="py-2 px-2 text-slate-500">
                         {f.first_seen ? format(new Date(f.first_seen), 'HH:mm') : '—'}
                       </td>
                       <td className="py-2 px-2">
-                        {f.runway_used === '11/29' && <Badge variant="blue">11/29</Badge>}
-                        {f.runway_used === '16/34' && <Badge variant="green">16/34</Badge>}
-                        {(!f.runway_used || f.runway_used === 'UNKNOWN') && <Badge variant="gray">UNK</Badge>}
+                        <RunwayCell runway={f.runway_used} isVieRelated={f.is_vie_related} />
                       </td>
-                      <td className="py-2 px-2 text-right">{f.max_altitude_m ? `${f.max_altitude_m}m` : '—'}</td>
-                      <td className="py-2 px-2 text-right font-mono text-xs">
+                      <td className="py-2 px-2 text-right font-mono" title="Closest approach to Mannersdorf center">
+                        {f.closest_distance_km != null ? `${Number(f.closest_distance_km).toFixed(1)} km` : '—'}
+                      </td>
+                      <td className="py-2 px-2 text-right font-mono">
                         {f.estimated_db != null ? `${Number(f.estimated_db).toFixed(1)} dBA` : '—'}
                       </td>
                     </tr>
@@ -138,6 +137,8 @@ export default function Dashboard() {
               </table>
           )}
         </div>
+
+        <MapView height="300px" recentFlights={recent.data?.data} />
       </div>
 
       {/* Week / Month summary */}
