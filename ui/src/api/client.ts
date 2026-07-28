@@ -76,4 +76,16 @@ export const api = {
       request<import('../types').ApiResponse<import('../types').Aircraft>>(`/aircraft/${icao24}`),
   },
   health: () => request<import('../types').HealthStatus>('/health'),
+  contact: {
+    create: (payload: {
+      name: string;
+      email: string;
+      subject: string;
+      message: string;
+    }) =>
+      request<{ data: { id: number; mail_sent: boolean } }>('/contact', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+  },
 };

@@ -69,5 +69,8 @@ $router->post('/api/noise', [App\Controllers\NoiseController::class, 'store']);
 // Aircraft
 $router->get('/api/aircraft/{icao24}', [App\Controllers\AircraftController::class, 'show']);
 
+// Contact form (About page)
+$router->post('/api/contact', [App\Controllers\ContactController::class, 'store']);
+
 // Dispatch
 $router->dispatch($method, $uri, $config);
