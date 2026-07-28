@@ -228,6 +228,26 @@ function throttle(int $ms): void {
 }
 
 /**
+ * Upper bound for Retry-After sleeps. The OpenSky server has been observed
+ * to return 9223372036 (PHP 32-bit int overflow in the upstream) or
+ * multi-hour values during shared-account /tracks/* exhaustion. Sleeping
+ * that long is never useful — we cap at 60 seconds and bail with a clear
+ * error instead.
+ */
+const MAX_RETRY_AFTER_SECONDS = 60;
+
+/**
+ * Sanity-check a Retry-After value. Returns the value to actually sleep,
+ * or null if we should bail (the server hint is unreasonable).
+ */
+function clampRetryAfter(?int $retryAfter): ?int {
+    if ($retryAfter === null) return null;
+    if ($retryAfter <= 0) return null;
+    if ($retryAfter > MAX_RETRY_AFTER_SECONDS) return null;
+    return $retryAfter;
+}
+
+/**
  * Issue a single GET request, returning structured result with headers.
  *
  * Honors 429 + X-Rate-Limit-Retry-After-Seconds by waiting that long
@@ -273,11 +293,20 @@ function apiGet(string $url, OpenSkyAuth $auth, int $throttleMs, string $label =
         }
 
         // Handle 429 with server-supplied backoff
-        if ($httpCode === 429 && $retryAfter !== null && $attempt === 0) {
-            $wait = max(1, $retryAfter);
-            fwrite(STDERR, "  [{$label}] HTTP 429 — backing off {$wait}s (per server)\n");
-            sleep($wait);
-            continue;
+        if ($httpCode === 429 && $attempt === 0) {
+            $clamped = clampRetryAfter($retryAfter);
+            if ($clamped !== null) {
+                fwrite(STDERR, "  [{$label}] HTTP 429 — backing off {$clamped}s (per server)\n");
+                sleep($clamped);
+                continue;
+            }
+            // Server told us to wait forever (or sent garbage). Bail.
+            $hint = $retryAfter !== null ? "{$retryAfter}s" : 'none';
+            fwrite(STDERR,
+                "  [{$label}] HTTP 429 with unreasonable Retry-After ({$hint}); "
+                . "bailing (will not sleep > " . MAX_RETRY_AFTER_SECONDS . "s).\n"
+            );
+            return ['code' => 429, 'body' => '', 'credits_remaining' => $creditsRemaining, 'elapsed_ms' => $elapsedMs];
         }
 
         return [
@@ -355,8 +384,8 @@ function apiGetParallel(array $urls, OpenSkyAuth $auth, int $maxConcurrent, int 
                 $retryAfter = (int)$m[1];
             }
 
-            if ($httpCode === 429 && $retryAfter !== null) {
-                $sawRetryAfter = max($sawRetryAfter ?? 0, $retryAfter);
+            if ($httpCode === 429) {
+                $sawRetryAfter = max($sawRetryAfter ?? 0, $retryAfter ?? 0);
             }
 
             $results[$i] = [
@@ -373,8 +402,23 @@ function apiGetParallel(array $urls, OpenSkyAuth $auth, int $maxConcurrent, int 
         curl_multi_close($mcurl);
 
         if ($sawRetryAfter !== null) {
-            fwrite(STDERR, "  [{$label}] batch hit 429 — backing off {$sawRetryAfter}s\n");
-            sleep(max(1, $sawRetryAfter));
+            $clamped = clampRetryAfter($sawRetryAfter);
+            if ($clamped !== null) {
+                fwrite(STDERR, "  [{$label}] batch hit 429 — backing off {$clamped}s (per server)\n");
+                sleep($clamped);
+            } else {
+                // Server told us to wait forever (OpenSky has been observed
+                // returning 9223372036 or multi-hour values when a bucket
+                // is account-shared and exhausted). Don't sleep > 60s; the
+                // caller will see all-429 results and exit the loop with
+                // a clean report.
+                fwrite(STDERR,
+                    "  [{$label}] batch hit 429 with unreasonable Retry-After "
+                    . "({$sawRetryAfter}s); pausing briefly and continuing. "
+                    . "Expect all remaining batches to 429 too.\n"
+                );
+                sleep(2);
+            }
         }
     }
 
