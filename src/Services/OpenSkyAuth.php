@@ -9,6 +9,10 @@ namespace App\Services;
  *
  * Handles client_credentials grant flow with automatic token refresh
  * (tokens expire after 30 minutes).
+ *
+ * Accepts an optional $credentialSetLabel (e.g. 'default' or 'backfill')
+ * used purely for log messages so operators can tell at a glance which
+ * OAuth2 client is making each request. The label is not sent to OpenSky.
  */
 class OpenSkyAuth
 {
@@ -16,6 +20,7 @@ class OpenSkyAuth
 
     private ?string $clientId;
     private ?string $clientSecret;
+    private string $credentialSetLabel;
 
     private ?string $accessToken = null;
     private ?int $expiresAt = null;
@@ -23,10 +28,19 @@ class OpenSkyAuth
     /** Margin (seconds) before expiry to proactively refresh. */
     private const REFRESH_MARGIN = 60;
 
-    public function __construct(array $openskyConfig)
+    public function __construct(array $openskyConfig, string $credentialSetLabel = 'default')
     {
         $this->clientId = $openskyConfig['client_id'] ?? null;
         $this->clientSecret = $openskyConfig['client_secret'] ?? null;
+        $this->credentialSetLabel = $credentialSetLabel;
+    }
+
+    /**
+     * The credential set label (e.g. 'default' or 'backfill'). For logging only.
+     */
+    public function getCredentialSetLabel(): string
+    {
+        return $this->credentialSetLabel;
     }
 
     /**
@@ -102,7 +116,8 @@ class OpenSkyAuth
 
         if ($response === false || $httpCode !== 200) {
             fwrite(STDERR, sprintf(
-                "[OpenSkyAuth] Token fetch failed: HTTP %d - %s\n",
+                "[OpenSkyAuth:%s] Token fetch failed: HTTP %d - %s\n",
+                $this->credentialSetLabel,
                 $httpCode,
                 $error ?: $response
             ));
@@ -111,7 +126,7 @@ class OpenSkyAuth
 
         $data = json_decode($response, true);
         if (!is_array($data) || !isset($data['access_token'])) {
-            fwrite(STDERR, "[OpenSkyAuth] Invalid token response\n");
+            fwrite(STDERR, "[OpenSkyAuth:{$this->credentialSetLabel}] Invalid token response\n");
             return null;
         }
 

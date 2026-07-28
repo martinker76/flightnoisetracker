@@ -24,9 +24,28 @@ return [
         'runway_classify_max_alt_m' => 3000,
     ],
     'opensky' => [
+        // Used by the live poller and the flight-detail track fetcher.
         // Get from https://opensky-network.org/apidoc/index.html
         'client_id'     => 'YOUR_OPENSKY_CLIENT_ID',
         'client_secret' => 'YOUR_OPENSKY_CLIENT_SECRET',
+    ],
+    // Separate credentials for the historical backfill script only.
+    // IMPORTANT: these MUST be the only credentials used by cron/backfill.php.
+    // The live poller (OpenSkyPoller) and the flight-detail track fetcher
+    // (FlightController) keep using the 'opensky' block above.
+    //
+    // Why isolate:
+    //   - The /tracks/* credit bucket fills up during backfills and resets
+    //     daily. Using a separate bucket for backfills prevents the live
+    //     poller from being rate-limited by backfill traffic.
+    //   - Auditing / quota tracking is cleaner: backfill usage vs. live usage
+    //     are billed separately.
+    //
+    // If 'opensky_backfill' is missing entirely, backfill.php will refuse
+    // to run (no silent fallback to 'opensky').
+    'opensky_backfill' => [
+        'client_id'     => 'YOUR_BACKFILL_OPENSKY_CLIENT_ID',
+        'client_secret' => 'YOUR_BACKFILL_OPENSKY_CLIENT_SECRET',
     ],
     'adsbexchange_api_key' => null,
     'base_path' => getenv('FNT_BASE_PATH') ?: '/',

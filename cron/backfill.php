@@ -7,6 +7,12 @@ declare(strict_types=1);
  *
  * Backfills flight data from OpenSky Network's historical API.
  *
+ * Credential isolation: this script uses config['opensky_backfill'] ONLY.
+ * The live poller (OpenSkyPoller) and the flight-detail track fetcher
+ * (FlightController) keep using config['opensky']. If 'opensky_backfill'
+ * is unset, the script refuses to run (no silent fallback). This keeps
+ * the backfill's credit burn separated from the live poller's bucket.
+ *
  * Strategy:
  *   1. Fetch LOWW arrivals/departures for the date range using STRICT
  *      2-day windows (each window spans exactly 2 calendar days to stay
@@ -116,7 +122,29 @@ echo "\n";
 // ─── Bootstrap ────────────────────────────────────────────────────────
 $config = require __DIR__ . '/../config/app.php';
 $db = Database::getConnection();
-$auth = new OpenSkyAuth($config['opensky']);
+
+// IMPORTANT: backfill uses a dedicated credential set ('opensky_backfill')
+// so the live poller's credit bucket isn't burned by backfill traffic.
+// The live poller and flight-detail track fetcher still use 'opensky'.
+// If 'opensky_backfill' is missing or unset, we REFUSE to run rather
+// than silently falling back to 'opensky' — that would defeat the
+// isolation goal.
+if (!isset($config['opensky_backfill'])
+    || empty($config['opensky_backfill']['client_id'])
+    || empty($config['opensky_backfill']['client_secret'])) {
+    fwrite(STDERR,
+        "ERROR: config['opensky_backfill'] is not configured.\n"
+        . "       Backfill must use a separate credential set to keep\n"
+        . "       the live poller's credit bucket isolated. Add an\n"
+        . "       'opensky_backfill' entry to config/app.php (see\n"
+        . "       config/app.example.php for the shape).\n"
+    );
+    exit(1);
+}
+
+$auth = new OpenSkyAuth($config['opensky_backfill'], 'backfill');
+echo "Using OpenSky credential set: 'backfill' (separate bucket from live poller)\n\n";
+
 $classifier = new RunwayClassifier($config['airport']);
 
 $box = $config['bounding_box'];
@@ -125,11 +153,6 @@ $maxLat = (float)$box['max_lat'];
 $minLon = (float)$box['min_lon'];
 $maxLon = (float)$box['max_lon'];
 [$mannersdorfLat, $mannersdorfLon] = [47.974, 16.604];
-
-if (!$auth->isConfigured()) {
-    fwrite(STDERR, "ERROR: OpenSky OAuth2 credentials not configured.\n");
-    exit(1);
-}
 
 // ─── Helper: ICAO airport code pre-filter ────────────────────────────
 /**
