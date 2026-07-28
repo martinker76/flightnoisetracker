@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use PDO;
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception as PHPMailerException;
 
 /**
  * Handles the About-page contact form.
@@ -245,19 +247,89 @@ class ContactController
     }
 
     /**
-     * Send email via PHP mail().
+     * Send email via SMTP auth using PHPMailer.
      *
-     * @return bool true if mail() reports success, false otherwise.
+     * Why SMTP auth: PHP's mail() on this server hands the message to the
+     * local exim, which then refuses to deliver ("550 Sender verify failed")
+     * because outbound DNS is blocked at the shared-host layer. The server
+     * has no usable From address. Authenticated SMTP to an external relay
+     * is the only working path.
+     *
+     * Configuration (env vars; never committed):
+     *   FNT_SMTP_HOST        e.g. smtp.mailersend.net
+     *   FNT_SMTP_PORT        587 (STARTTLS) or 465 (implicit TLS)
+     *   FNT_SMTP_USERNAME    relay username
+     *   FNT_SMTP_PASSWORD    relay password / API token
+     *   FNT_SMTP_FROM_ADDR   e.g. noreply@your-domain.tld (must be a verified
+     *                         sender on the relay side; e.g. for MailerSend
+     *                         the From domain must match the verified domain)
+     *   FNT_SMTP_FROM_NAME   e.g. "FlightNoiseTracker"
+     *
+     * If any required setting is missing, we fall back to PHP mail() and
+     * log a clear error so the operator can spot the misconfiguration.
+     *
+     * @return bool true if the SMTP server accepted the message, false otherwise.
      */
     private function sendMail(string $name, string $fromEmail, string $subject, string $message): bool
     {
-        // Construct headers. Use Reply-To so the operator can reply directly
-        // to the sender. The From address is the inbox (we don't authenticate
-        // outbound mail as the sender; many shared hosts reject mismatched From).
         $inbox = $this->configInbox;
         $safeName = $this->stripHeaderUnsafe($name);
         $safeSubject = $this->stripHeaderUnsafe($subject);
 
+        // Try the configured SMTP relay first; fall back to mail() if not set up.
+        $smtpHost = getenv('FNT_SMTP_HOST');
+        $smtpUser = getenv('FNT_SMTP_USERNAME');
+        $smtpPass = getenv('FNT_SMTP_PASSWORD');
+        $smtpFromAddr = getenv('FNT_SMTP_FROM_ADDR');
+        $smtpFromName = getenv('FNT_SMTP_FROM_NAME') ?: 'FlightNoiseTracker';
+        $smtpPort = (int)(getenv('FNT_SMTP_PORT') ?: 587);
+
+        if ($smtpHost && $smtpUser && $smtpPass && $smtpFromAddr) {
+            try {
+                $mail = new PHPMailer(true);
+                $mail->isSMTP();
+                $mail->Host = $smtpHost;
+                $mail->Port = $smtpPort;
+                $mail->SMTPAuth = true;
+                $mail->Username = $smtpUser;
+                $mail->Password = $smtpPass;
+                $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+                $mail->CharSet = 'UTF-8';
+
+                // From: a verified address on the relay side; not the submitter's.
+                // (Most relays refuse to send From: an unverified address.)
+                $mail->setFrom($smtpFromAddr, $smtpFromName);
+
+                // To: operator inbox
+                $mail->addAddress($inbox);
+
+                // Reply-To: the actual submitter, so a reply lands in their inbox.
+                $mail->addReplyTo($fromEmail, $safeName);
+
+                $body = "New contact-form submission for FlightNoiseTracker\n" .
+                        "================================================\n\n" .
+                        "From:    {$safeName} <{$fromEmail}>\n" .
+                        "Subject: {$safeSubject}\n" .
+                        "Date:    " . gmdate('c') . "\n" .
+                        "IP:      " . ($_SERVER['REMOTE_ADDR'] ?? 'unknown') . "\n\n" .
+                        "----------------------------------------\n\n" .
+                        $message . "\n";
+
+                $mail->Subject = '[FlightNoiseTracker] ' . $safeSubject;
+                $mail->Body = $body;
+                $mail->AltBody = $body;
+
+                $sent = $mail->send();
+                return $sent;
+            } catch (PHPMailerException $e) {
+                error_log('[contact] SMTP send failed: ' . $e->getMessage());
+                return false;
+            }
+        }
+
+        // Fallback: local mail() (will likely fail on this shared host, but
+        // we don't want to throw a 500 if SMTP isn't configured yet — the
+        // DB row is already saved so the audit trail is intact).
         $headers = [];
         $headers[] = 'From: ' . $inbox;
         $headers[] = 'Reply-To: ' . $safeName . ' <' . $fromEmail . '>';
@@ -275,7 +347,7 @@ class ContactController
                 "----------------------------------------\n\n" .
                 $message . "\n";
 
-        return mail($inbox, '[FlightNoiseTracker] ' . $safeSubject, $body, implode("\r\n", $headers));
+        return @mail($inbox, '[FlightNoiseTracker] ' . $safeSubject, $body, implode("\r\n", $headers));
     }
 
     /**
