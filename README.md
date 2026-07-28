@@ -15,10 +15,10 @@ React SPA (Vite)  →  PHP REST API (Apache)  →  MariaDB
 
 ## Tech Stack
 
-- **Backend:** PHP 8.2+ on Apache 2.4 (no framework)
+- **Backend:** PHP 8.2+ on Apache 2.4 (production, Plesk-managed on Hetzner shared hosting) or Caddy 2.x with PHP-FPM (local dev)
 - **Database:** MariaDB 10.11+ (MySQL 8.0 compatible)
 - **Autoloading:** Composer PSR-4 (`App\` → `src/`)
-- **External APIs:** OpenSky Network (live flight data)
+- **External APIs:** OpenSky Network (live + OAuth2), ADSB.lol (aircraft type lookup)
 
 ## Project Structure
 

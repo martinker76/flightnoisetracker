@@ -1,9 +1,12 @@
 # FlightNoiseTracker — Specification
 
-**Version:** 1.3  
+**Version:** 1.4  
+**Last updated:** 2026-07-28
 **Status:** Live  
 **Repository:** `https://github.com/martinker76/flightnoisetracker`  
-**Live URL:** `https://openclaw.kersch.at/flightnoisetracker/`
+**Live URLs:**
+- **Production**: `https://kersch.at/flightnoisetracker/` (Hetzner shared hosting, public)
+- **Local dev**: `https://openclaw.kersch.at/flightnoisetracker/` (Caddy on OpenClaw host)
 
 ## 1. Purpose
 
@@ -116,26 +119,33 @@ Runway determination is inferred from the aircraft's heading, altitude, and posi
 
 **States include:** ICAO24, callsign, origin_country, lat, lon, altitude, velocity, heading, vertical_rate, on_ground, timestamp.
 
-### 5.2 Historical Backfill (OpenSky — same OAuth2 credentials)
+### 5.2 Historical Backfill (OpenSky — separate OAuth2 credentials)
 
-A CLI PHP script `cron/backfill.php` (v3) fetches historical flights via:
+A CLI PHP script `cron/backfill.php` (**v4**, was v1 → v2 → v3 → v4, current) fetches historical flights:
 
-1. **`/flights/arrival?airport=LOWW`** — LOWW arrivals (≤2 day windows, ~30 credits)
-2. **`/flights/departure?airport=LOWW`** — LOWW departures (>2 day windows, ~30 credits)
-3. **Pre-filter** by flight origin/destination ICAO code:
-   - Western/Northern European airports (UK, NL, BE, FR, ES, PT, CH, DK, SE, NO, FI) → skip (approach from west/north, rarely cross box)
-   - Italian airports (LI*) → keep (approach from south, frequently cross)
-   - German (ED*) + rest of world → keep
-   - Unknown → keep
+**Credentials isolation (commit adfa20c):** Backfill has its **own** OAuth2 client (`opensky_backfill` block in `config/app.php`). Live poller (`OpenSkyPoller`) and flight-detail fetcher (`FlightController`) continue to use `opensky`. If `opensky_backfill` is missing, the script **refuses to run** — no silent fallback. This prevents the backfill from exhausting the live poller's `/states/*` credit bucket.
+
+**Pipeline:**
+
+1. **`/flights/arrival?airport=LOWW` AND `/flights/departure?airport=LOWW`** — day-aligned 2-day windows (start=00:00:00 UTC, end=23:59:59 UTC of next day). Each call ~30 credits on `/flights/*` bucket.
+2. **Pre-filter** by flight origin/destination ICAO code (skip western/northern European airports, keep southern + rest of world) — reduces track fetches by ~75%.
+3. **`/tracks/*`** — parallel `curl_multi` (default concurrency 4) fetches historical tracks, ~4 credits per call.
+4. **Insert** box-crossing flights into `flights` and `flight_positions` with `source='opensky-historical'`.
+
+**Critical fixes (commits 97f4eda + e5e07b2):**
+
+- **v4 day-aligned windows** — earlier versions used windows that touched a 3rd day, triggering OpenSky's HTTP 400 "*You can only query across 2 partitions (days)*". v4 explicitly UTC-suffixes strtotime and bounds windows strictly: `2026-06-27 00:00:00 → 2026-06-28 23:59:59` (NOT 23:59:59 of the 3rd day).
+- **Retry-After cap at 60s** — server has returned `X-Rate-Limit-Retry-After-Seconds: 9223372036` (epoch overflow, ~292 years). Without the cap, the script would camp forever. Now capped to 60s; on overflow, the batch pauses 2s and continues.
+- **`/tracks/*` is account-shared, not per-client** — discovered July 2026. Both `mkersch` and `piotrc` clients see the same `/tracks/*` quota. New credentials help with `/flights/*` and `/states/*` but NOT `/tracks/*`. To fetch historical tracks, wait for the bucket's UTC midnight reset.
    - Typical reduction: ~66% (109 LOWW flights → 37 candidates)
 4. **`/tracks/all?icao24=X&time=T`** — parallel curl_multi (concurrency 8) for candidate flights, ~4 credits each
 5. **Filter tracks** by bounding box, insert matches
 
 **Limitation:** Track data only available for up to 30 days in the past.
 
-### 5.3 Aircraft Metadata (OpenFlights — planned)
+### 5.3 Aircraft Metadata (ADSB.lol — implemented)
 
-`aircraft.dat` (CSV, monthly refresh) maps ICAO24 → aircraft type. Table exists but metadata population not yet implemented.
+Aircraft type resolution uses the public `api.adsb.lol/v2/icao/{icao24}` endpoint (was: planned OpenFlights CSV import). `OpenSkyPoller::resolveAircraftType()` is called when a new flight is inserted and re-tried on subsequent polls if the initial lookup returned null. Cost: zero credits (public API, no rate limit issues observed at LOWW's flight volume).
 
 ### 5.4 Noise Measurements
 
@@ -263,18 +273,32 @@ Runway determination is a server-side PHP function in `RunwayClassifier.php`:
 function classify(array $positions): array
 ```
 
-**Heuristic:**
-1. Find the position sample with the **lowest altitude** within 30 km of the airport
-2. Determine if the flight is **departing** (altitude increasing + heading away from airport) or **arriving** (altitude decreasing + heading toward airport)
-3. Check the **heading** at that closest point:
-   - Headings 260°–320° → **RWY 11/29** (approaching from east) or departing toward west
-   - Headings 80°–140° → **RWY 11/29** (approaching from west) or departing toward east
-   - Headings 140°–200° → **RWY 16/34** (approaching from north) or departing toward south
-   - Headings 320°–20° → **RWY 16/34** (approaching from south) or departing toward north
-4. Assign confidence based on altitude (lower altitude = higher confidence) and heading clarity
-5. Returns `['runway' => '11/29'|'16/34'|'UNKNOWN', 'confidence' => 0.00-1.00, 'is_vie_related' => bool]`
+**Algorithm (5 steps + heuristic fallback):**
 
-A flight is classified as **VIE-related** if its closest approach to LOWW is within 50 km and its altitude at that point is below 6,000 m. Otherwise it's an **overflight**.
+1. **Find lowest-altitude position within `runway_classify_max_km` of the airport** (default 20 km, configurable; tighter than the VIE-related bounds so only geometry-clean traffic gets a runway stamp).
+
+2. **Determine `is_vie_related` separately** with broader bounds (`vie_related_max_km` 50 km, `vie_related_max_alt_m` 6000 m). A flight may be VIE-related (in the noise area) without being close enough to stamp a runway.
+
+3. **Classify runway from heading** at the lowest-altitude position:
+   - Headings 260°–320° or 80°–140° → **RWY 11/29**
+   - Headings 140°–200° or 320°–20° → **RWY 16/34**
+   - Headings in the gap (20°–80° or 200°–260°) → returns UNKNOWN at this step
+
+4. **(Commit 7cf3326) Heuristic fallback for "mid-turn" flights.** When heading falls in the gap AND the flight is VIE-related AND altitude < 3000 m, default to **RWY 16/34** with confidence capped at 0.5. Rationale: LOWW uses 16/34 ~93% of the time when classifiable (151/162 = 93.2% in prod data); 11/29 is reserved for night-time noise abatement. This catches real runway approaches captured during their turn to/from runway alignment — without it, ~9 flights/day are mis-classified as UNKNOWN. The lower confidence ceiling distinguishes heuristic from clean classifications (which average 0.91).
+
+5. **Invariant enforcement** — `runway_used != 'UNKNOWN' IMPLIES is_vie_related = true`. If a non-VIE-related flight happened to be assigned a runway (e.g., overflight at 7000 m that briefly comes within 10 km of LOWW), the runway stamp is cleared back to UNKNOWN. This is what keeps the dashboard clean — overflights never get a runway attribution even if their heading happens to align.
+
+6. **Confidence calculation** — base 0.5 + bonuses:
+   - Heading clarity: +0.0 to +0.3 (perfect alignment +0.3, 30° off +0.0)
+   - Altitude: +0.05 to +0.20 (lower = higher)
+   - Distance to airport: +0.05 to +0.10 (closer = higher)
+   - Capped at 1.0. Heuristic fallback caps at 0.5.
+
+7. **Return value**: `['runway' => '11/29'|'16/34'|'UNKNOWN', 'confidence' => 0.00-1.00, 'is_vie_related' => bool, 'approach_type' => 'arrival'|'departure'|null]`
+
+**Reclassification:** When a new position arrives for a flight already marked UNKNOWN + VIE-related, the poller calls `OpenSkyPoller::reclassifyFlight()` (threshold: 1 position, was 3 before commit 7cf3326). Most flights have only 1-2 position samples (OpenSky `/states/all` returns the latest state per flight), so this lower threshold was needed to keep the runway stamp up-to-date as better data arrives.
+
+A flight is **VIE-related** if its closest approach to LOWW is within 50 km and its altitude at that point is below 6,000 m. Otherwise it's an **overflight**, and the classifier returns `runway = 'UNKNOWN'` regardless of heading (per the invariant in step 5).
 
 ## 8. API Design
 
@@ -631,30 +655,31 @@ handle_path /flightnoisetracker* {
 
 ## 13. Implementation Status
 
-| Phase | Scope | Status |
-|-------|-------|--------|
-| **1. Backend API** | PHP REST API + DB schema + 6 controllers + router | ✅ Done |
-| **2. OpenSky Poller** | `cron/poll.php` + systemd timer + OAuth2 + RunwayClassifier | ✅ Done |
-| **3. Frontend** | React + Vite, 6 pages, 12+ components | ✅ Done |
-| **4. Stats Dashboard** | Chart.js daily/hourly runway breakdown + trend | ✅ Done |
-| **5. Historical Backfill** | `cron/backfill.php` v3 with airport pre-filter | ✅ Done (run pending credit reset) |
-| **6. Noise Log** | Manual entry form + list | ✅ Done |
-| **7. Polish & Deploy** | Caddy config, systemd, SSL, subpath routing | ✅ Done |
-| — | **About page** | ✅ Done |
-| — | **Closest-distance UI** | ✅ Done |
-| — | **QA fixes (8 issues)** | ✅ Done & re-reviewed |
-| — | **OpenSky OAuth2 migration** | ✅ Done |
-| — | **Boundary box audibility refinement** | ✅ Done |
-| — | **Tooltip icons on Dashboard & Stats** | ✅ Done |
-| — | **Cache-control meta tags (stale cache fix)** | ✅ Done |
-| — | **Track Visualization on Flight Detail** | ✅ Done |
-| — | **Runway Distribution Tooltip** | ✅ Done |
-| — | **Callsign Tooltip Positioning Fix** | ✅ Done |
-| — | Aircraft type resolution (OpenSky metadata) | ❌ Not yet implemented |
-| — | Noise estimation (geometric model) | ❌ Not yet implemented |
-| — | Dashboard table redesign (remove Leave, add Aircraft/Est. dB) | ❌ Not yet implemented |
-| — | Stats page aircraft/noise cards | ❌ Not yet implemented |
-| — | About page noise/aircraft explanation | ❌ Not yet implemented |
+| Phase | Scope | Status | Commit |
+|-------|-------|--------|--------|
+| **1. Backend API** | PHP REST API + DB schema + 6 controllers + router | ✅ Done | initial |
+| **2. OpenSky Poller** | `cron/poll.php` + Hetzner cron + OAuth2 + `RunwayClassifier` | ✅ Done | initial |
+| **3. Frontend** | React + Vite, 6 pages, 12+ components | ✅ Done | initial |
+| **4. Stats Dashboard** | Chart.js daily/hourly runway breakdown + trend | ✅ Done | initial |
+| **5. Historical Backfill** | `cron/backfill.php` **v4** with day-aligned windows, Retry-After cap, separate OAuth2 creds | ✅ Done | 97f4eda + adfa20c + e5e07b2 |
+| **6. Noise Log** | Manual entry form + list | ✅ Done | initial |
+| **7. Polish & Deploy** | Caddy, Plesk+Apache, SSL, subpath routing | ✅ Done | initial |
+| — | **About page** | ✅ Done | initial |
+| — | **Closest-distance UI** | ✅ Done | initial |
+| — | **QA fixes (8 issues)** | ✅ Done & re-reviewed | initial |
+| — | **OpenSky OAuth2 migration** | ✅ Done | initial |
+| — | **Boundary box audibility refinement** | ✅ Done | initial |
+| — | **Tooltip icons on Dashboard & Stats** | ✅ Done | initial |
+| — | **Cache-control meta tags (stale cache fix)** | ✅ Done | initial |
+| — | **Track Visualization on Flight Detail** | ✅ Done | initial |
+| — | **Runway Distribution Tooltip** | ✅ Done | initial |
+| — | **Callsign Tooltip Positioning Fix** | ✅ Done | initial |
+| — | **v1.1 multi-component noise model (SEL + phase-aware dBA)** | ✅ Done | d9af538 |
+| — | **Aircraft type resolution (ADSB.lol)** | ✅ Done | d9af538 |
+| — | **Dashboard table redesign (overflight vs VIE-unk, Aircraft/Est. dB columns)** | ✅ Done | 97f4eda |
+| — | **Mid-turn runway heuristic** (commit 7cf3326) | ✅ Done | 7cf3326 |
+| — | **Reclassify existing flights cron** (`cron/reclassify-existing.php`) | ✅ Done | b445de8 |
+| — | **Open follow-ups** | ⏳ See "Open Items" | — |
 
 ## 14. Data Retention & Privacy
 
@@ -664,12 +689,16 @@ handle_path /flightnoisetracker* {
 
 ## 15. Open Items (Deferred)
 
-| Item | Status |
-|------|--------|
-| Aircraft metadata population (OpenFlights) | ⏳ Not started |
-| ADS-B Exchange historical (not needed — OpenSky sufficient) | ❌ v2 |
-| Additional airports (Linz, Graz, Bratislava) | ❌ v2 |
-| Noise sensor integration | ❌ v2 |
-| Unit tests / CI pipeline | ❌ v2 |
-| Database backup automation | ❌ v2 |
-| Historical backfill 7-day run (waiting for track bucket reset) | ⏳ Tue Jul 27 |
+| Item | Status | Notes |
+|------|--------|-------|
+| Aircraft metadata population (OpenFlights) | ❌ Replaced | Resolved via `adsb.lol` lookup per-flight (d9af538). |
+| ADS-B Exchange historical | ❌ v2 | OpenSky sufficient for now. |
+| Additional airports (Linz, Graz, Bratislava) | ❌ v2 | Single-airport scope (VIE only). |
+| Noise sensor integration | ❌ v2 | Manual entries only for now. |
+| Unit tests / CI pipeline | ⏳ Partial | `tests/RunwayClassifierTest.php` added (7cf3326). CI not yet wired. |
+| Database backup automation | ❌ v2 | DB on local disk only, no offsite copy. |
+| Historical backfill 7-day run | ⏳ Waiting | `/tracks/*` bucket exhausted. Reset @ UTC midnight; `cron/backfill.php --days 7 --refresh-stats --request-delay-ms 1000` produces ~1,320 tracks, 100–300 box-crossing flights. |
+| FR24 one-time batch script | ⏳ Awaiting go-ahead | Requires FR24 API token + license confirmation. ~4h dev, standalone `cron/fetch-fr24.php`, no main-branch changes. |
+| DB password rotation | 🔴 CRITICAL | Both `kersch_flightn_w` prod password (`s5!W!/2FQ6*f`) and dev password leaked in chat. Rotate via Plesk panel + MariaDB `ALTER USER`. |
+| Hetzner `www.kersch.at` vhost | ⏳ Panel action | Re-add in KAS panel → Domains (was removed during HTTPS activation). |
+| API filter bug (`runway_used=UNKNOWN` ignored) | ⏳ Minor | Filter params are not being respected; returns full dataset. Worth fixing for proper UI filtering. |
