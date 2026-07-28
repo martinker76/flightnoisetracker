@@ -19,6 +19,33 @@ require_once __DIR__ . '/../vendor/autoload.php';
 $config = require __DIR__ . '/../config/app.php';
 
 // Set timezone
+
+// Inject SMTP relay creds as env vars (from config) so PHPMailer (which uses
+// getenv) sees them. The PHP-FPM pool can't set them at the panel layer,
+// and we can't reach the panel config. This is the runtime fallback.
+//
+// Source order (first-wins):
+//   1. Existing env vars (panel-set, sysadmin-set, .htaccess SetEnv)
+//   2. config/app.php 'smtp' block
+//   3. PHP mail() fallback (last resort; on this shared host fails with 550)
+if (isset($config['smtp']) && is_array($config['smtp'])) {
+    $smtpEnvMap = [
+        'FNT_SMTP_HOST'      => $config['smtp']['host']         ?? null,
+        'FNT_SMTP_PORT'      => $config['smtp']['port']         ?? null,
+        'FNT_SMTP_USERNAME'  => $config['smtp']['username']     ?? null,
+        'FNT_SMTP_PASSWORD'  => $config['smtp']['password']     ?? null,
+        'FNT_SMTP_FROM_ADDR' => $config['smtp']['from_address'] ?? null,
+        'FNT_SMTP_FROM_NAME' => $config['smtp']['from_name']     ?? null,
+    ];
+    foreach ($smtpEnvMap as $name => $value) {
+        if ($value !== null && $value !== '' && getenv($name) === false) {
+            putenv("{$name}={$value}");
+            $_ENV[$name] = $value;
+        }
+    }
+}
+
+
 date_default_timezone_set('UTC');
 
 // CORS and security headers are set by .htaccess (single source of truth).
