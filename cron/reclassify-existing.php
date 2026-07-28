@@ -20,7 +20,7 @@ $db = new PDO(
 $classifier = new \App\Services\RunwayClassifier($config['airport']);
 
 // Get all flights with UNKNOWN runway
-$stmt = $db->query("SELECT id, callsign FROM flights WHERE runway_used = 'UNKNOWN'");
+$stmt = $db->query("SELECT id, callsign, is_vie_related FROM flights WHERE runway_used = 'UNKNOWN'");
 $flights = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $total = count($flights);
 echo "Found $total flights to reclassify...\n";
