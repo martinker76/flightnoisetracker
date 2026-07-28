@@ -37,7 +37,6 @@ export default function About() {
       <MonitoredAreaSection />
       <ReferencePointSection />
       <AirportSection />
-      <NoiseTrackingSection />
       <EstimatedNoiseSection />
       <StatisticsSection />
       <TechnicalNotesSection />
@@ -64,6 +63,15 @@ function PurposeSection() {
         The app captures every flight passing through Mannersdorf's airspace, classifies which
         runway at Vienna International Airport (LOWW / VIE) each flight is using, and provides
         daily and hourly statistics to track trends over time.
+      </p>
+      <p className="text-xs text-slate-500 dark:text-slate-400 italic leading-relaxed border-l-2 border-slate-300 dark:border-slate-600 pl-3 mt-2">
+        <strong>Disclaimer:</strong> All data shown here is based on public sources
+        (primarily the OpenSky Network community ADS-B feed) and on derived
+        calculations (runway classification, distance, estimated noise). Although we
+        try to be accurate, errors can occur — both in the source data and in our
+        processing — and individual records may therefore be incorrect. Use the
+        information with appropriate caution; nothing on this site is intended as
+        aviation-grade data.
       </p>
     </section>
   );
@@ -209,22 +217,7 @@ function AirportSection() {
   );
 }
 
-function NoiseTrackingSection() {
-  return (
-    <section className="card space-y-3">
-      <h2 className="text-lg font-semibold">Noise Tracking</h2>
-      <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
-        Manual noise observations can be logged through the{' '}
-        <Link to="/noise" className="text-blue-600 dark:text-blue-400 hover:underline">
-          Noise Log
-        </Link>{' '}
-        page &mdash; noting the decibel level, time, and optional location. These entries are
-        linked to flights that were passing through the bounding box at the recorded time,
-        helping correlate noise events with specific aircraft and runway usage.
-      </p>
-    </section>
-  );
-}
+
 
 function EstimatedNoiseSection() {
   return (

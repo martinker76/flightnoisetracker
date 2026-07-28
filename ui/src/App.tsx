@@ -7,7 +7,6 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Flights = lazy(() => import('./pages/Flights'));
 const FlightDetail = lazy(() => import('./pages/FlightDetail'));
 const Stats = lazy(() => import('./pages/Stats'));
-const NoiseLog = lazy(() => import('./pages/NoiseLog'));
 const About = lazy(() => import('./pages/About'));
 
 export default function App() {
@@ -43,14 +42,6 @@ export default function App() {
           element={
             <Suspense fallback={<LoadingSpinner />}>
               <Stats />
-            </Suspense>
-          }
-        />
-        <Route
-          path="noise"
-          element={
-            <Suspense fallback={<LoadingSpinner />}>
-              <NoiseLog />
             </Suspense>
           }
         />

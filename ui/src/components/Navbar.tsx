@@ -30,7 +30,6 @@ export function Navbar() {
               <NavLink to="/" end className={linkClass}>Dashboard</NavLink>
               <NavLink to="/flights" className={linkClass}>Flights</NavLink>
               <NavLink to="/stats" className={linkClass}>Statistics</NavLink>
-              <NavLink to="/noise" className={linkClass}>Noise Log</NavLink>
               <NavLink to="/about" className={linkClass}>About</NavLink>
             </div>
           </div>
@@ -56,7 +55,6 @@ export function Navbar() {
           <NavLink to="/" end className={linkClass}>Dashboard</NavLink>
           <NavLink to="/flights" className={linkClass}>Flights</NavLink>
           <NavLink to="/stats" className={linkClass}>Statistics</NavLink>
-          <NavLink to="/noise" className={linkClass}>Noise Log</NavLink>
           <NavLink to="/about" className={linkClass}>About</NavLink>
         </div>
       </div>
