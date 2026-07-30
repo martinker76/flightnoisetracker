@@ -32,6 +32,21 @@ class OpenSkyPoller
     private float $minLon;
     private float $maxLon;
 
+    /**
+     * OpenSky REST endpoint to query. Default is `states/all` (global feed).
+     * Set to `states/own` once you have a registered feeder so the poller
+     * sees only your locally-fed ADS-B data — and so the request is free
+     * (no credits) regardless of cadence.
+     */
+    private string $endpoint;
+
+    /**
+     * Tag written to `flight_positions.source` for rows produced by this poller.
+     * Default is `opensky`. With a home feeder, set to `home-adsb` (requires
+     * migration 006 to extend the source ENUM).
+     */
+    private string $source;
+
     /** @var array{inserted: int, updated: int, positions: int, errors: int} */
     private array $counters = ['inserted' => 0, 'updated' => 0, 'positions' => 0, 'errors' => 0];
 
@@ -56,6 +71,10 @@ class OpenSkyPoller
         $this->maxLat = (float)$box['max_lat'];
         $this->minLon = (float)$box['min_lon'];
         $this->maxLon = (float)$box['max_lon'];
+
+        $osky = $config['opensky'];
+        $this->endpoint = (string)($osky['endpoint'] ?? 'states/all');
+        $this->source   = (string)($osky['source']   ?? 'opensky');
     }
 
     /**
@@ -100,14 +119,14 @@ class OpenSkyPoller
      */
     private function fetchStates(): array
     {
-        // Use bounding box filter in API call for efficiency
-        $url = sprintf(
-            'https://opensky-network.org/api/states/all?lamin=%.4f&lomin=%.4f&lamax=%.4f&lomax=%.4f',
-            $this->minLat,
-            $this->minLon,
-            $this->maxLat,
-            $this->maxLon
-        );
+        // `states/all` accepts a bbox filter; `states/own` does not (filtered client-side
+        // further down in parseStates() against $this->minLat/maxLat/minLon/maxLon).
+        $bboxQuery = $this->endpoint === 'states/all'
+            ? sprintf('?lamin=%.4f&lomin=%.4f&lamax=%.4f&lomax=%.4f',
+                $this->minLat, $this->minLon, $this->maxLat, $this->maxLon)
+            : '';
+
+        $url = sprintf('https://opensky-network.org/api/%s%s', $this->endpoint, $bboxQuery);
 
         $ch = curl_init();
         curl_setopt_array($ch, [
@@ -269,7 +288,7 @@ class OpenSkyPoller
                     'vertical_rate_mps' => $state['vertical_rate'],
                     'on_ground' => $state['on_ground'],
                     'distance_km' => round($distance, 2),
-                    'source' => 'opensky',
+                    'source' => $this->source,
                 ]);
 
                 $this->counters['positions']++;
@@ -299,7 +318,7 @@ class OpenSkyPoller
                     'vertical_rate_mps' => $state['vertical_rate'],
                     'on_ground' => $state['on_ground'],
                     'distance_km' => round($distance, 2),
-                    'source' => 'opensky',
+                    'source' => $this->source,
                 ]);
 
                 $this->counters['positions']++;
