@@ -1,7 +1,7 @@
 # FlightNoiseTracker — Specification
 
-**Version:** 1.4  
-**Last updated:** 2026-07-28
+**Version:** 1.5  
+**Last updated:** 2026-07-31
 **Status:** Live  
 **Repository:** `https://github.com/martinker76/flightnoisetracker`  
 **Live URLs:**
@@ -48,8 +48,8 @@ Runway determination is inferred from the aircraft's heading, altitude, and posi
 ## 3. Goals & Non-Goals
 
 ### Goals (v1)
-- Poll OpenSky every 60 s for live flights within the Mannersdorf bounding box
-- Persist every flight + position sample with timestamps
+- Poll OpenSky via two endpoints in parallel: `states/all` (global feed, paid) and `states/own` (home-feeder feed, free). The two pollers are offset by 30 s so wall-clock cadence is ~30 s; each individual poller fires every 60 s
+- Persist every flight + position sample with timestamps. `flight_positions.source` distinguishes rows (`opensky` vs `home-adsb`); both can coexist per flight
 - Classify flights as VIE-related (departure or arrival) or overflight (crossing only)
 - Infer runway (11/29 vs 16/34) for VIE-related flights
 - Provide daily and hourly **runway statistics** (counts per runway, trend over time)
@@ -84,10 +84,13 @@ Runway determination is inferred from the aircraft's heading, altitude, and posi
                   └─────────────────┘
                            │
                            ▼
-                  ┌─────────────────┐
-                  │  fnt-poll.timer  │  ← runs every 60s
-                  │  cron/poll.php   │
-                  └─────────────────┘
+                  ┌──────────────────────────────────────────┐
+                  │  cron (4 entries on staggered 30s offsets)│
+                  │  cron/poll.php (--endpoint=states/all)    │  ← every 60s
+                  │  cron/poll.php (--endpoint=states/own)    │  ← every 60s, offset 30s
+                  │  per-endpoint flock on                    │
+                  │    /tmp/fnt-poll-states_{all,own}.lock    │
+                  └──────────────────────────────────────────┘
                   ┌─────────────────┐
                   │  cron/backfill.php│  ← manual, one-shot
                   └─────────────────┘
@@ -115,7 +118,14 @@ Runway determination is inferred from the aircraft's heading, altitude, and posi
 | `/tracks/*`    | 4,000       | 4 credits (single timestamp) |
 | `/flights/*`   | 4,000       | 4–30 credits (by partitions) |
 
-**Live polling:** `GET /states/all` (unfiltered, ~1 credit per call). The poller fetches all states every 60 s via systemd timer, then filters server-side by bounding box.
+**Live polling:** dual endpoint in parallel:
+
+- `GET /states/all` (paid — 1 credit per call). Filtered server-side by the Mannersdorf bounding box.
+- `GET /states/own` (free — returns only data fed by an OpenSky-registered ADS-B receiver). The endpoint accepts no bbox params; the poller filters client-side against the same bounding box.
+
+Both endpoints run in parallel via two `cron/poll.php` invocations on a 30 s offset (4 cron entries total, see §10). Each invocation receives `--endpoint` and `--source` as CLI flags; values fall back to `config['opensky']['endpoint']` and `config['opensky']['source']` when omitted. A per-endpoint `flock(LOCK_EX | LOCK_NB)` on `/tmp/fnt-poll-states_{all,own}.lock` prevents concurrent runs of the same endpoint; different endpoints do not share the lock.
+
+**Effective cadence:** each endpoint fires on a 60 s wall-clock cadence; the two endpoints are offset by 30 s, so a poll happens every ~30 s on the wire.
 
 **States include:** ICAO24, callsign, origin_country, lat, lon, altitude, velocity, heading, vertical_rate, on_ground, timestamp.
 
@@ -205,7 +215,7 @@ CREATE TABLE flight_positions (
     vertical_rate_mps DECIMAL(4,1),
     on_ground BOOLEAN DEFAULT FALSE,
     distance_km DECIMAL(6,2),           -- haversine distance from Mannersdorf center
-    source ENUM('opensky','adsbexchange','opensky-historical') NOT NULL DEFAULT 'opensky',
+    source ENUM('opensky','adsbexchange','opensky-historical','home-adsb') NOT NULL DEFAULT 'opensky',  -- 'home-adsb' added by migration 006
     INDEX idx_flight (flight_id),
     INDEX idx_captured (captured_at),
     FOREIGN KEY (flight_id) REFERENCES flights(id) ON DELETE CASCADE
@@ -529,25 +539,54 @@ New sections added to the About page:
 
 ## 10. Polling Implementation
 
-PHP CLI script `cron/poll.php` runs via systemd timer `fnt-poll.timer` every 60 seconds.
+PHP CLI script `cron/poll.php` runs as a **dual-poller**: two parallel cron jobs staggered by 30 s, each targeting one OpenSky endpoint. A single-host deployment (Hetzner) is sufficient — both endpoints run in parallel because they don't share a file lock.
+
+**Crontab (`/etc/cron.d/fnt-poll`):**
+
+```cron
+* * * * * www-data sleep 0;  /usr/bin/php /var/www/flightnoisetracker/cron/poll.php --endpoint=states/all --source=opensky    >> /var/log/fnt/poll-osk.log  2>&1
+* * * * * www-data sleep 15; /usr/bin/php /var/www/flightnoisetracker/cron/poll.php --endpoint=states/own --source=home-adsb >> /var/log/fnt/poll-home.log 2>&1
+* * * * * www-data sleep 30; /usr/bin/php /var/www/flightnoisetracker/cron/poll.php --endpoint=states/all --source=opensky    >> /var/log/fnt/poll-osk.log  2>&1
+* * * * * www-data sleep 45; /usr/bin/php /var/www/flightnoisetracker/cron/poll.php --endpoint=states/own --source=home-adsb >> /var/log/fnt/poll-home.log 2>&1
+```
+
+Net effect: each endpoint fires on a 60 s wall-clock cadence; the two endpoints are offset by 30 s, so a poll happens every ~30 s on the wire. Per-source logs (`poll-osk.log`, `poll-home.log`) make a noisy one endpoint easy to filter from the other.
+
+**Per-endpoint file lock:** `OpenSkyPoller::poll()` opens `/tmp/fnt-poll-states_all.lock` or `/tmp/fnt-poll-states_own.lock` (the `/` in the endpoint is rewritten to `_`) and calls `flock(LOCK_EX | LOCK_NB)`. If the lock is held by another invocation of the same endpoint, the call logs `"Poll skipped: another <endpoint> poll is already running"` to STDERR and returns with zero counters. Different endpoints never share a lock, so the two parallel pollers do not block each other.
+
+**CLI flags accepted by `cron/poll.php`:**
+- `--endpoint=states/all|states/own` — which OpenSky REST endpoint to query. Falls back to `config['opensky']['endpoint']` when omitted (default `states/all`).
+- `--source=opensky|home-adsb` — tag written to `flight_positions.source`. Falls back to `config['opensky']['source']` when omitted (default `opensky`).
+- `--refresh-stats` — additionally refresh the `daily_stats` materialized table for the current UTC date.
+
+**Endpoint behaviour:**
+- `states/all`: ~1 credit/call. Accepts `lamin`/`lomin`/`lamax`/`lomax` bbox query params and is filtered server-side by OpenSky. ~1,440 credits/day at this cadence.
+- `states/own`: free (no credits). Returns only aircraft received by an OpenSky-registered ADS-B receiver under our account. The endpoint accepts no bbox params, so the poller filters client-side against the same bounding box (a double-check after the API response). Requires migration 006 to extend the `flight_positions.source` ENUM to include `home-adsb`.
 
 **Flow:**
-1. OpenSky `GET /states/all` with OAuth2 Bearer token (via `OpenSkyAuth.php`)
-2. Filter states where lat/lon fall within the Mannersdorf bounding box
-3. For each match:
+1. OpenSky `GET /api/{endpoint}` with OAuth2 Bearer token (via `OpenSkyAuth.php`)
+2. For each state vector:
    - Normalize ICAO24 to lowercase, strip whitespace from callsign
-   - Check if `flights` table already has a flight with (icao24, first_seen) within the last **60 minutes** (not 24h — tightened during QA)
+   - Server-side or client-side bbox filter (per endpoint above)
+   - Check if `flights` table already has a flight with (icao24, last_seen) within the last **60 minutes**
    - If new flight: INSERT into `flights`, set is_vie_related and runway via `classifyRunway()`
    - If existing flight: UPDATE `last_seen`, `max_altitude`, etc.
-   - INSERT position sample into `flight_positions` with haversine `distance_km` from Mannersdorf center
-4. Update `poll_state` with timestamp and row counts
+   - INSERT position sample into `flight_positions` with haversine `distance_km` from Mannersdorf center and `source` = the poller's configured `$this->source`
+3. Update `poll_state` with timestamp and row counts, keying on `$this->source` (not the literal `opensky` — see "Source-aware poll_state" below)
 
-**Systemd setup:**
-- `/etc/systemd/system/fnt-poll.service` — runs `php /var/www/flightnoisetracker/cron/poll.php`
-  - Environment vars: `FNT_DB_NAME`, `FNT_DB_USER`, `FNT_DB_PASS`, `FNT_OSKY_CLIENT_ID`, `FNT_OSKY_CLIENT_SECRET`
-- `/etc/systemd/system/fnt-poll.timer` — fires every 60 seconds, no random delay
+**Source-aware poll_state:** `updatePollState()` writes to the `poll_state` table using `$this->source` as the primary key. Before the dual-poller refactor the value was hardcoded to the literal `opensky`, so the poller running with `source='home-adsb'` would overwrite or miss the row regardless of which endpoint had actually run. Each endpoint now independently tracks its own health (`poll_state.source IN ('opensky', 'home-adsb')`).
 
-**Token management:** `OpenSkyAuth.php` handles automatic token fetch and refresh (30-min expiry, refreshes at 25-min margin). Single `TokenManager` instance reused across all requests.
+**Cost:**
+- `states/all`: ~1,440 credits/day at this cadence (1 credit × 1,440 calls/day). Well within the 4,000/day Standard-tier quota.
+- `states/own`: free.
+
+**Coverage rationale:** `states/all` (the global OpenSky feed) catches high-altitude overflights that the home antenna can't see, especially at night when our local receiver's ground gain favours arrivals within the radio horizon. `states/own` catches low/mid arrivals that the home antenna hears first (lower latency, lower credit cost). Both contribute to the same `flights` and `flight_positions` tables; per-row source tagging means downstream stats can attribute detections to one or both paths.
+
+**Home feeder ("Kersch-Vienna"):** the OpenSky-registered ADS-B receiver running on the home rack. Receives via `dump1090-mutability` (gain 43.9), reads SBS/BaseStation on 127.0.0.1:30003, and forwards to OpenSky's network via the official `opensky-feeder` binary. OpenSky feeder registration serial: 2886971112. Feeder started 2026-07-30. Backend queries to that feed go through `states/own`.
+
+**Environment variables** (set in the cron environment, panel-side, or `.htaccess`): `FNT_DB_NAME`, `FNT_DB_USER`, `FNT_DB_PASS`, `FNT_OSKY_CLIENT_ID`, `FNT_OSKY_CLIENT_SECRET`. The cron entries above assume the system environment passes them through to the `www-data` user; alternatively, wrap with `FNT_DB_PASS=...` inline prefixes per entry.
+
+**Token management:** `OpenSkyAuth.php` handles automatic token fetch and refresh (30-min expiry, refreshes at 25-min margin). The token is shared across both pollers because they live in the same DB row — refreshing it for one endpoint refreshes it for the other. For `states/own`, OpenSky accepts both authenticated and anonymous calls from a registered feeder, so the Bearer is functionally optional there; `OpenSkyAuth::headers()` still returns the configured header when credentials are present.
 
 ## 11. Configuration
 
@@ -574,6 +613,14 @@ return [
     'opensky' => [
         'client_id' => getenv('FNT_OSKY_CLIENT_ID') ?: null,   // OAuth2, not username/password
         'client_secret' => getenv('FNT_OSKY_CLIENT_SECRET') ?: null,
+        // Which REST endpoint to query. 'states/all' (global feed, paid) or
+        // 'states/own' (home-feeder feed, free). Default 'states/all' to keep
+        // existing behavior; switch the home-adsb cron entry to 'states/own'
+        // once migration 006 has been applied.
+        'endpoint' => getenv('FNT_OSKY_ENDPOINT') ?: 'states/all',
+        // Tag written to `flight_positions.source` for rows produced by this
+        // poller. 'opensky' or 'home-adsb'. Default 'opensky'.
+        'source' => getenv('FNT_OSKY_SOURCE') ?: 'opensky',
     ],
     'adsbexchange_api_key' => null,   // unused in v1
     'base_path' => getenv('FNT_BASE_PATH') ?: '/',    // subpath prefix, e.g. '/flightnoisetracker'
@@ -587,7 +634,15 @@ return [
 ];
 ```
 
-**Runtime env overrides:** All sensitive values (`FNT_DB_PASS`, `FNT_OSKY_CLIENT_SECRET`) are set via environment variables in the systemd service file, not in source control. Config defaults are safe fallbacks.
+**Runtime env overrides:** All sensitive values (`FNT_DB_PASS`, `FNT_OSKY_CLIENT_SECRET`) are set via environment variables (cron environment, PHP-FPM pool env, or PHP `getenv()`), not in source control. Config defaults are safe fallbacks.
+
+**Where the two new `opensky` keys are read:**
+- `opensky.endpoint` (`states/all` | `states/own`) is honoured by the constructor of `App\Services\OpenSkyPoller` and overridable per-invocation by `cron/poll.php --endpoint=...`.
+- `opensky.source` (`opensky` | `home-adsb`) is honoured the same way and overridable by `cron/poll.php --source=...`.
+
+Both keys default to the legacy behaviour (`states/all`, `opensky`) so the dual-poller is opt-in per cron entry, not per config.
+
+`config/app.php` (not `app.example.php`) is intentionally gitignored — it carries the live OpenSky client secret and DB password on this host.
 
 ## 12. Deployment
 
@@ -631,12 +686,17 @@ handle_path /flightnoisetracker* {
 │   ├── Config/          # Database.php
 │   └── Router.php       # Lightweight REST router
 ├── cron/
-│   ├── poll.php         # Live poller (every 60s via systemd timer)
+│   ├── poll.php         # Live poller (dual-poller, --endpoint / --source CLI flags)
 │   └── backfill.php     # Historical backfill (manual CLI, v3)
 ├── config/
 │   └── app.php          # All app config with env var overrides
 ├── migrations/
-│   └── 001_schema.sql
+│   ├── 001_schema.sql              # core schema
+│   ├── 002_flight_tracks.sql
+│   ├── 003_noise_aircraft.sql
+│   ├── 004_add_sel_db.sql
+│   ├── 005_contact_messages.sql
+│   └── 006_source_home_adsb.sql    # extends flight_positions.source ENUM
 ├── ui/                  # React source (Vite project)
 │   ├── src/             # Pages, components, hooks, types
 │   ├── vite.config.ts   # base: '/flightnoisetracker/'
@@ -658,7 +718,7 @@ handle_path /flightnoisetracker* {
 | Phase | Scope | Status | Commit |
 |-------|-------|--------|--------|
 | **1. Backend API** | PHP REST API + DB schema + 6 controllers + router | ✅ Done | initial |
-| **2. OpenSky Poller** | `cron/poll.php` + Hetzner cron + OAuth2 + `RunwayClassifier` | ✅ Done | initial |
+| **2. OpenSky Poller** | `cron/poll.php` + Hetzner crontab (4 entries on 30s offsets) + OAuth2 + `RunwayClassifier` — dual-poller over `/states/all` + `/states/own` | ✅ Done | initial (single), 9fc9ad9 (dual-poller + home ADS-B) |
 | **3. Frontend** | React + Vite, 6 pages, 12+ components | ✅ Done | initial |
 | **4. Stats Dashboard** | Chart.js daily/hourly runway breakdown + trend | ✅ Done | initial |
 | **5. Historical Backfill** | `cron/backfill.php` **v4** with day-aligned windows, Retry-After cap, separate OAuth2 creds | ✅ Done | 97f4eda + adfa20c + e5e07b2 |
@@ -679,6 +739,7 @@ handle_path /flightnoisetracker* {
 | — | **Dashboard table redesign (overflight vs VIE-unk, Aircraft/Est. dB columns)** | ✅ Done | 97f4eda |
 | — | **Mid-turn runway heuristic** (commit 7cf3326) | ✅ Done | 7cf3326 |
 | — | **Reclassify existing flights cron** (`cron/reclassify-existing.php`) | ✅ Done | b445de8 |
+| — | **Home ADS-B feeder + dual-poller** (Kersch-Vienna / dump1090-mutability, `/states/own`, `home-adsb` source tag, per-endpoint flock) | ✅ Done | 9fc9ad9 |
 | — | **Open follow-ups** | ⏳ See "Open Items" | — |
 
 ## 14. Data Retention & Privacy
@@ -702,3 +763,4 @@ handle_path /flightnoisetracker* {
 | DB password rotation | 🔴 CRITICAL | Both `kersch_flightn_w` prod password (`s5!W!/2FQ6*f`) and dev password leaked in chat. Rotate via Plesk panel + MariaDB `ALTER USER`. |
 | Hetzner `www.kersch.at` vhost | ⏳ Panel action | Re-add in KAS panel → Domains (was removed during HTTPS activation). |
 | API filter bug (`runway_used=UNKNOWN` ignored) | ⏳ Minor | Filter params are not being respected; returns full dataset. Worth fixing for proper UI filtering. |
+| 2026-07-30 11:24–13:10 UTC 429 storm on `/states/own` | ⏳ Investigate | OpenSky throttle tripped while the new home-adsb path was the only active feeder. Root cause not yet isolated; possibly registration-account warm-up or initial credibility window. No recurrence since 13:10 UTC. |
