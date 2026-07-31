@@ -1,0 +1,31 @@
+-- Migration 006: extend the `flight_positions.source` ENUM to include
+-- `home-adsb` for rows produced by a locally-fed ADS-B receiver that
+-- pushes data into OpenSky via the official `opensky-feeder` binary.
+--
+-- Effective from: 2026-07-30 (Kersch-Vienna home ADS-B receiver online)
+--
+-- Pre-conditions:
+--   - The home rack runs dump1090-mutability (or readsb) with the
+--     data exposed on 127.0.0.1:30003 (SBS/BaseStation).
+--   - An OpenSky feeder account is registered at opensky-network.org
+--     and the corresponding serial number is configured in the local
+--     `opensky-feeder` install.
+--   - `config/app.php` is updated to set
+--       opensky.endpoint = 'states/own'
+--       opensky.source   = 'home-adsb'
+--
+-- DDL safety:
+--   - Extending an ENUM with a new value at the END is a metadata-only
+--     change in MariaDB / MySQL 8.0+, no table rewrite required.
+--   - The runtime DB user `kersch_flightn_w` is DML-only; this ALTER
+--     must be applied via the admin user `kersch_flightn` (Plesk panel
+--     → Databases → phpMyAdmin, or `mysql -u kersch_flightn -p`).
+--
+-- Rollback:
+--   ALTER TABLE flight_positions
+--     MODIFY source ENUM('opensky','adsbexchange') NOT NULL DEFAULT 'opensky';
+--   (Will fail if any row currently has source='home-adsb'; delete those
+--    rows first.)
+
+ALTER TABLE flight_positions
+    MODIFY source ENUM('opensky','adsbexchange','home-adsb') NOT NULL DEFAULT 'opensky';

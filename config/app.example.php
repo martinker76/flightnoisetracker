@@ -28,6 +28,18 @@ return [
         // Get from https://opensky-network.org/apidoc/index.html
         'client_id'     => 'YOUR_OPENSKY_CLIENT_ID',
         'client_secret' => 'YOUR_OPENSKY_CLIENT_SECRET',
+
+        // Which REST endpoint to query. Defaults to 'states/all' (global feed;
+        // 1 credit per call, bbox-filtered server-side). Set to 'states/own'
+        // once you have a registered feeder — that endpoint returns ONLY your
+        // own fed data, costs no credits, and unlocks the 8,000/day active-
+        // feeder tier once your uptime qualifies.
+        'endpoint'      => 'states/all',
+
+        // Tag written to `flight_positions.source` for rows produced by this
+        // poller. With a home feeder, set to 'home-adsb' (requires migration
+        // 006 to extend the source ENUM). Otherwise leave as 'opensky'.
+        'source'        => 'opensky',
     ],
     // Separate credentials for the historical backfill script only.
     // IMPORTANT: these MUST be the only credentials used by cron/backfill.php.
