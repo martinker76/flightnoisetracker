@@ -107,7 +107,7 @@ class ContactController
 
         // Length checks
         if (mb_strlen($name) > self::MAX_NAME) {
-            $this->sendError("name exceeds {$name} chars.", 'INVALID_PARAMETER', 422);
+            $this->sendError('name exceeds ' . self::MAX_NAME . ' chars.', 'INVALID_PARAMETER', 422);
             return;
         }
         if (mb_strlen($email) > self::MAX_EMAIL) {
@@ -123,7 +123,7 @@ class ContactController
             return;
         }
         if (mb_strlen($message) > self::MAX_MESSAGE) {
-            $this->sendError("message exceeds {$message} chars.", 'INVALID_PARAMETER', 422);
+            $this->sendError('message exceeds ' . self::MAX_MESSAGE . ' chars.', 'INVALID_PARAMETER', 422);
             return;
         }
 
@@ -214,56 +214,74 @@ class ContactController
     }
 
     /**
-     * Sliding-window rate limit per IP. Upsert logic with last-write-wins
-     * semantics — a single row per IP storing the window start time.
+     * Sliding-window per-IP rate limit. One row per IP in `contact_rate_limit`,
+     * atomic via SELECT ... FOR UPDATE so concurrent requests from the same
+     * IP cannot both pass the check. Previously this was a non-atomic
+     * read-modify-write — under contention, two first-time requests could
+     * both attempt the fresh INSERT (raising an uncaught PDOException), or
+     * two requests at the boundary could both pass and bump the count past
+     * the cap.
      */
     private function checkRateLimit(string $ip): bool
     {
-        $now = time();
-
-        $stmt = $this->db->prepare(
-            'SELECT message_count, UNIX_TIMESTAMP(window_start) AS window_start_ts
-             FROM contact_rate_limit WHERE ip_address = :ip'
-        );
-        $stmt->execute([':ip' => $ip]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        if ($row === false) {
-            // No entry yet — insert fresh
-            $ins = $this->db->prepare(
-                'INSERT INTO contact_rate_limit (ip_address, message_count, window_start)
-                 VALUES (:ip, 1, UTC_TIMESTAMP())'
+        $this->db->beginTransaction();
+        try {
+            $sel = $this->db->prepare(
+                'SELECT message_count, UNIX_TIMESTAMP(window_start) AS ws_ts
+                 FROM contact_rate_limit WHERE ip_address = :ip FOR UPDATE'
             );
-            $ins->execute([':ip' => $ip]);
-            return true;
-        }
+            $sel->execute([':ip' => $ip]);
+            $row = $sel->fetch(PDO::FETCH_ASSOC);
+            $now = time();
 
-        $windowStart = (int)$row['window_start_ts'];
-        $count = (int)$row['message_count'];
+            if ($row === false) {
+                // First request from this IP
+                $ins = $this->db->prepare(
+                    'INSERT INTO contact_rate_limit (ip_address, message_count, window_start)
+                     VALUES (:ip, 1, UTC_TIMESTAMP())'
+                );
+                $ins->execute([':ip' => $ip]);
+                $this->db->commit();
+                return true;
+            }
 
-        if (($now - $windowStart) >= self::RATE_LIMIT_WINDOW_SECONDS) {
-            // Window expired — reset
+            $count = (int)$row['message_count'];
+            $windowStart = (int)$row['ws_ts'];
+            $windowAge = $now - $windowStart;
+
+            if ($windowAge >= self::RATE_LIMIT_WINDOW_SECONDS) {
+                // Window expired — reset
+                $upd = $this->db->prepare(
+                    'UPDATE contact_rate_limit
+                     SET message_count = 1, window_start = UTC_TIMESTAMP()
+                     WHERE ip_address = :ip'
+                );
+                $upd->execute([':ip' => $ip]);
+                $this->db->commit();
+                return true;
+            }
+
+            if ($count >= self::RATE_LIMIT_MAX) {
+                // At cap — deny without incrementing
+                $this->db->commit();
+                return false;
+            }
+
+            // Within window, under cap — increment
             $upd = $this->db->prepare(
                 'UPDATE contact_rate_limit
-                 SET message_count = 1, window_start = UTC_TIMESTAMP()
+                 SET message_count = message_count + 1
                  WHERE ip_address = :ip'
             );
             $upd->execute([':ip' => $ip]);
+            $this->db->commit();
             return true;
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
         }
-
-        if ($count >= self::RATE_LIMIT_MAX) {
-            return false;
-        }
-
-        // Within window, under limit — bump count
-        $upd = $this->db->prepare(
-            'UPDATE contact_rate_limit
-             SET message_count = message_count + 1
-             WHERE ip_address = :ip'
-        );
-        $upd->execute([':ip' => $ip]);
-        return true;
     }
 
     /**

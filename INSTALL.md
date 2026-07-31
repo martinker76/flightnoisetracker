@@ -107,47 +107,36 @@ a2enmod rewrite
 systemctl restart apache2
 ```
 
-### 8. Set Up Polling
+### 8. Set Up Polling (dual-poller crontab)
 
-Install systemd service and timer:
+The poller runs as two parallel cron jobs staggered by 30 s, each targeting one OpenSky endpoint. Both write into the same tables; the `flight_positions.source` ENUM (`opensky` or `home-adsb`) distinguishes rows.
 
 ```bash
-# Create service file
-cat > /etc/systemd/system/fnt-poll.service <<'EOF'
-[Unit]
-Description=FlightNoiseTracker OpenSky Poller
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/php /var/www/flightnoisetracker/cron/poll.php --refresh-stats
-WorkingDirectory=/var/www/flightnoisetracker
-User=www-data
-StandardOutput=append:/var/log/fnt-poll.log
-StandardError=append:/var/log/fnt-poll-error.log
+# Create cron file
+cat > /etc/cron.d/fnt-poll <<'EOF'
+* * * * * www-data sleep 0;  /usr/bin/php /var/www/flightnoisetracker/cron/poll.php --endpoint=states/all --source=opensky    >> /var/log/fnt/poll-osk.log  2>&1
+* * * * * www-data sleep 15; /usr/bin/php /var/www/flightnoisetracker/cron/poll.php --endpoint=states/own --source=home-adsb >> /var/log/fnt/poll-home.log 2>&1
+* * * * * www-data sleep 30; /usr/bin/php /var/www/flightnoisetracker/cron/poll.php --endpoint=states/all --source=opensky    >> /var/log/fnt/poll-osk.log  2>&1
+* * * * * www-data sleep 45; /usr/bin/php /var/www/flightnoisetracker/cron/poll.php --endpoint=states/own --source=home-adsb >> /var/log/fnt/poll-home.log 2>&1
 EOF
 
-# Create timer file
-cat > /etc/systemd/system/fnt-poll.timer <<'EOF'
-[Unit]
-Description=FlightNoiseTracker Polling Timer
-
-[Timer]
-OnBootSec=30
-OnUnitActiveSec=60
-RandomizedDelaySec=10
-
-[Install]
-WantedBy=timers.target
-EOF
-
-# Enable and start
-systemctl daemon-reload
-systemctl enable --now fnt-poll.timer
-
-# Check status
-systemctl status fnt-poll.timer
-systemctl list-timers fnt-poll.timer
+chmod 644 /etc/cron.d/fnt-poll
+mkdir -p /var/log/fnt
+touch /var/log/fnt/poll-osk.log /var/log/fnt/poll-home.log
+chown -R www-data:adm /var/log/fnt
 ```
+
+Net effect: each endpoint fires on a 60 s wall-clock cadence, with the two endpoints offset by 30 s, so a poll happens every 30 s on the wire. A `flock(LOCK_EX | LOCK_NB)` per endpoint on `/tmp/fnt-poll-states_{all,own}.lock` keeps two concurrent runs of the same endpoint from colliding; different endpoints do not share a lock, so both can run in parallel.
+
+Cost: `states/all` is 1 credit per call (~1,440 credits/day at this cadence). `states/own` is free. 1,440 credits/day sits well within the 4,000/day Standard-tier quota.
+
+CLI flags accepted by `cron/poll.php`:
+
+- `--endpoint=states/all|states/own` — which OpenSky REST endpoint to query
+- `--source=opensky|home-adsb` — tag written to `flight_positions.source` for rows produced by this run
+- `--refresh-stats` — also refresh the `daily_stats` materialized table for today (UTC date)
+
+When `--endpoint` and `--source` are omitted, values fall back to `config['opensky']['endpoint']` and `config['opensky']['source']` (default `states/all` / `opensky`).
 
 ### 9. Create Log Directory
 
@@ -166,7 +155,8 @@ curl http://localhost/api/health
 curl http://localhost/api/flights
 
 # Check poll logs
-tail -f /var/log/fnt-poll.log
+tail -f /var/log/fnt/poll-osk.log
+tail -f /var/log/fnt/poll-home.log
 ```
 
 ## Validation Checklist
@@ -178,8 +168,8 @@ Run these checks to verify installation:
 - [ ] `./validate.sh` reports 0 errors
 - [ ] Database connection works (`php -r "require 'vendor/autoload.php'; \App\Config\Database::getConnection();"`)
 - [ ] Apache serves `/api/health` with JSON response
-- [ ] Polling timer is active (`systemctl status fnt-poll.timer`)
-- [ ] Poll logs show successful runs
+- [ ] Polling cron is installed (`cat /etc/cron.d/fnt-poll`)
+- [ ] Poll logs show successful runs (`/var/log/fnt/poll-osk.log`, `/var/log/fnt/poll-home.log`)
 
 ## Troubleshooting
 
@@ -201,11 +191,16 @@ mysql -u fnt_app -p -e "SHOW DATABASES;"
 
 ### Polling Not Running
 
-Check timer status and logs:
+Check cron entries and per-endpoint logs:
 
 ```bash
-systemctl status fnt-poll.timer
-journalctl -u fnt-poll.service -n 50
+cat /etc/cron.d/fnt-poll
+grep CRON /var/log/syslog | grep fnt-poll | tail -20
+tail -50 /var/log/fnt/poll-osk.log
+tail -50 /var/log/fnt/poll-home.log
+
+# If a poll slot is being skipped (per-endpoint file lock busy), confirm via:
+ls -l /tmp/fnt-poll-states_all.lock /tmp/fnt-poll-states_own.lock
 ```
 
 ### Permission Issues

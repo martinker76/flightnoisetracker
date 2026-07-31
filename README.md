@@ -10,7 +10,8 @@ The app determines whether the volume of flights routed across the city is incre
 React SPA (Vite)  →  PHP REST API (Apache)  →  MariaDB
                            ↓
                    OpenSky Network API
-                   (polled every 60s via cron)
+                   (dual-poller: /states/all + /states/own,
+                    offset 30s, two cron entries alternating)
 ```
 
 ## Tech Stack
@@ -34,11 +35,16 @@ flightnoisetracker/
 │   ├── Config/             # Database connection
 │   └── Router.php          # Lightweight REST router
 ├── cron/
-│   └── poll.php            # OpenSky polling script (runs every 60s)
+│   └── poll.php            # OpenSky polling script (CLI flags: --endpoint, --source, --refresh-stats)
 ├── config/
 │   └── app.php             # Application configuration
 ├── migrations/
-│   └── 001_schema.sql      # Database schema
+│   ├── 001_schema.sql      # Database schema
+│   ├── 002_flight_tracks.sql
+│   ├── 003_noise_aircraft.sql
+│   ├── 004_add_sel_db.sql
+│   ├── 005_contact_messages.sql
+│   └── 006_source_home_adsb.sql  # extends flight_positions.source ENUM with 'home-adsb'
 ├── composer.json
 └── README.md
 ```
@@ -73,39 +79,21 @@ mysql -u fnt_app -p fnt < migrations/001_schema.sql
 
 Point your Apache document root to `public/` and ensure `mod_rewrite` is enabled.
 
-### 5. Set Up Polling (systemd)
+### 5. Set Up Polling (crontab, dual-poller)
 
-Create the service and timer:
+The poller runs as two parallel cron entries staggered by 30 s, each targeting one OpenSky endpoint. Both write into the same `flights` / `flight_positions` tables; the source tag in `flight_positions.source` distinguishes rows (`opensky` for `states/all`, `home-adsb` for `states/own`).
 
-```ini
-# /etc/systemd/system/fnt-poll.service
-[Unit]
-Description=FlightNoiseTracker OpenSky Poller
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/php /var/www/fnt/cron/poll.php --refresh-stats
-WorkingDirectory=/var/www/fnt
-User=www-data
-
-# /etc/systemd/system/fnt-poll.timer
-[Unit]
-Description=FlightNoiseTracker Polling Timer
-
-[Timer]
-OnBootSec=30
-OnUnitActiveSec=60
-RandomizedDelaySec=10
-
-[Install]
-WantedBy=timers.target
+```cron
+# /etc/cron.d/fnt-poll
+* * * * * www-data sleep 0;  /usr/bin/php /var/www/fnt/cron/poll.php --endpoint=states/all --source=opensky    >> /var/log/fnt/poll-osk.log  2>&1
+* * * * * www-data sleep 15; /usr/bin/php /var/www/fnt/cron/poll.php --endpoint=states/own --source=home-adsb >> /var/log/fnt/poll-home.log 2>&1
+* * * * * www-data sleep 30; /usr/bin/php /var/www/fnt/cron/poll.php --endpoint=states/all --source=opensky    >> /var/log/fnt/poll-osk.log  2>&1
+* * * * * www-data sleep 45; /usr/bin/php /var/www/fnt/cron/poll.php --endpoint=states/own --source=home-adsb >> /var/log/fnt/poll-home.log 2>&1
 ```
 
-Enable and start:
+Net effect: each endpoint fires on a 60 s wall-clock cadence, with the two endpoints offset by 30 s (so a poll happens every 30 s on the wire). A `flock(LOCK_EX | LOCK_NB)` per endpoint on `/tmp/fnt-poll-states_{all,own}.lock` prevents concurrent runs of the same endpoint; different endpoints never conflict.
 
-```bash
-systemctl enable --now fnt-poll.timer
-```
+Cost: `states/all` is 1 credit per call (~1,440 credits/day at this cadence). `states/own` is free. 1,440 credits/day fits well within the 4,000/day Standard-tier quota.
 
 ## API Endpoints
 

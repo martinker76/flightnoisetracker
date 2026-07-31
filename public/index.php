@@ -12,6 +12,28 @@ declare(strict_types=1);
 error_reporting(E_ALL);
 ini_set('display_errors', '0');
 
+// Top-level exception handler. Catches anything that bubbles past the
+// router — controller constructor failures (e.g., DB connection failure
+// in `Database::getConnection()`), or unexpected throwables from a
+// controller method. Returns a structured 500 JSON instead of a blank body.
+//
+// We log the error to PHP's error_log so operators can see it, but the
+// response body never contains the exception message / stack trace.
+set_exception_handler(function (\Throwable $e): void {
+    error_log('[uncaught] ' . get_class($e) . ': ' . $e->getMessage()
+        . ' at ' . $e->getFile() . ':' . $e->getLine());
+
+    if (!headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+    }
+    echo json_encode(
+        ['error' => 'Internal server error.', 'code' => 'INTERNAL_ERROR'],
+        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+    );
+    exit;
+});
+
 // Autoloader
 require_once __DIR__ . '/../vendor/autoload.php';
 

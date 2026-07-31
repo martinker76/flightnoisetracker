@@ -89,9 +89,15 @@ class OpenSkyPoller
     {
         $this->counters = ['inserted' => 0, 'updated' => 0, 'positions' => 0, 'errors' => 0];
 
-        // Per-endpoint file lock to prevent concurrent runs of the same endpoint
+        // Per-endpoint file lock to prevent concurrent runs of the same endpoint.
+        // Lock lives in app-owned var/run/ (not /tmp) so co-tenant users on shared
+        // hosting can't pre-create symlinks or hold the lock to cause a DoS.
         $lockTag = str_replace('/', '_', $this->endpoint);
-        $lockFile = sys_get_temp_dir() . '/fnt-poll-' . $lockTag . '.lock';
+        $lockDir = __DIR__ . '/../../var/run';
+        if (!is_dir($lockDir)) {
+            @mkdir($lockDir, 0755, true);
+        }
+        $lockFile = $lockDir . '/fnt-poll-' . $lockTag . '.lock';
         $lockFp = fopen($lockFile, 'c');
         if ($lockFp === false || !flock($lockFp, LOCK_EX | LOCK_NB)) {
             $msg = sprintf("[%s] Poll skipped: another %s poll is already running\n", gmdate('Y-m-d H:i:s'), $this->endpoint);
@@ -268,17 +274,24 @@ class OpenSkyPoller
         try {
             $icao24 = $state['icao24'];
             $now = gmdate('Y-m-d H:i:s');
+            // Round first_seen to the minute so two pollers (states/all vs
+            // states/own, 30s offset) capturing the same aircraft within the
+            // same minute converge on the SAME `flights` row instead of
+            // inserting two separate rows. The uniq key is (icao24, first_seen);
+            // without this rounding, the offsets produce distinct first_seen
+            // values and silently fragment position data across two flight rows.
+            $firstSeenMinute = substr($now, 0, 16) . ':00';
             $capturedAt = gmdate('Y-m-d H:i:s.') . sprintf('%03d', (int)(microtime(true) * 1000) % 1000);
 
             // Check if this aircraft already has an active flight (seen within last 60 min)
             $existingFlight = $this->findActiveFlight($icao24);
 
             if ($existingFlight === null) {
-                // New flight: classify and insert
+                // New flight: classify and insert (first_seen rounded to the minute)
                 $classification = $this->classifier->classify([$state]);
                 $distance = $this->classifier->distanceFromMannersdorf($state['lat'], $state['lon']);
 
-                $flight = $this->flightModel->findOrCreate($icao24, $now, [
+                $flight = $this->flightModel->findOrCreate($icao24, $firstSeenMinute, [
                     'callsign' => $state['callsign'] ?: null,
                     'origin_country' => $state['origin_country'],
                     'last_seen' => $now,
