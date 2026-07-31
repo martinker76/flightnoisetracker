@@ -5,15 +5,15 @@ declare(strict_types=1);
 /**
  * FlightNoiseTracker — OpenSky Network Polling Script
  *
- * This script is executed every 60 seconds via systemd timer.
+ * This script is executed every 60 seconds via cron.
  * It fetches live aircraft states from OpenSky, filters by the Mannersdorf
  * bounding box, and persists flight + position data.
  *
- * Usage: php cron/poll.php [--refresh-stats]
+ * Usage: php cron/poll.php [--endpoint=states/all|states/own] [--source=opensky|home-adsb] [--refresh-stats]
  *
- * Systemd timer setup:
- *   /etc/systemd/system/fnt-poll.service
- *   /etc/systemd/system/fnt-poll.timer
+ * When --endpoint and --source are omitted, values are read from config/app.php.
+ * Two parallel pollers (states/all + states/own) each run on their own 30s-offset
+ * cron schedule with explicit flags to avoid config coupling.
  */
 
 // Ensure we're running from CLI
@@ -35,19 +35,27 @@ use App\Services\OpenSkyPoller;
 // Load config
 $config = require __DIR__ . '/../config/app.php';
 
-$refreshStats = in_array('--refresh-stats', $argv ?? [], true);
+// Parse CLI flags
+$opts = getopt('', ['endpoint:', 'source:', 'refresh-stats']);
+
+$endpointOverride = isset($opts['endpoint']) && is_string($opts['endpoint']) ? $opts['endpoint'] : null;
+$sourceOverride   = isset($opts['source'])   && is_string($opts['source'])   ? $opts['source']   : null;
+$refreshStats     = array_key_exists('refresh-stats', $opts);
 
 $startTime = microtime(true);
 
 try {
-    $poller = new OpenSkyPoller($config);
+    $poller = new OpenSkyPoller($config, $endpointOverride, $sourceOverride);
     $result = $poller->poll();
 
     $elapsed = round((microtime(true) - $startTime) * 1000, 1);
 
+    $sourceLabel = $sourceOverride ?? $config['opensky']['source'] ?? 'opensky';
+
     $logLine = sprintf(
-        "[%s] Poll complete: %d states found, %d inserted, %d updated, %d positions, %d errors (%.1fms)\n",
+        "[%s] [%s] Poll complete: %d states found, %d inserted, %d updated, %d positions, %d errors (%.1fms)\n",
         gmdate('Y-m-d H:i:s'),
+        $sourceLabel,
         $result['states_found'],
         $result['inserted'],
         $result['updated'],
@@ -74,9 +82,11 @@ try {
     exit(0);
 } catch (\Throwable $e) {
     $elapsed = round((microtime(true) - $startTime) * 1000, 1);
+    $sourceLabel = $sourceOverride ?? $config['opensky']['source'] ?? 'opensky';
     $errorLine = sprintf(
-        "[%s] Poll FAILED: %s (%.1fms)\n",
+        "[%s] [%s] Poll FAILED: %s (%.1fms)\n",
         gmdate('Y-m-d H:i:s'),
+        $sourceLabel,
         $e->getMessage(),
         $elapsed
     );

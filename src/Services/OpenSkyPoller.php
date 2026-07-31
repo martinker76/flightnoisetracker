@@ -55,8 +55,11 @@ class OpenSkyPoller
 
     private ?bool $selDbAvailable = null;
 
-    public function __construct(private array $config)
-    {
+    public function __construct(
+        private array $config,
+        ?string $endpointOverride = null,
+        ?string $sourceOverride = null,
+    ) {
         $this->db = Database::getConnection();
         $this->flightModel = new Flight();
         $this->positionModel = new FlightPosition();
@@ -73,8 +76,8 @@ class OpenSkyPoller
         $this->maxLon = (float)$box['max_lon'];
 
         $osky = $config['opensky'];
-        $this->endpoint = (string)($osky['endpoint'] ?? 'states/all');
-        $this->source   = (string)($osky['source']   ?? 'opensky');
+        $this->endpoint = $endpointOverride ?? (string)($osky['endpoint'] ?? 'states/all');
+        $this->source   = $sourceOverride   ?? (string)($osky['source']   ?? 'opensky');
     }
 
     /**
@@ -86,29 +89,47 @@ class OpenSkyPoller
     {
         $this->counters = ['inserted' => 0, 'updated' => 0, 'positions' => 0, 'errors' => 0];
 
-        // Update poll timestamp
-        $this->updatePollState('polling');
-
-        try {
-            $states = $this->fetchStates();
-        } catch (\RuntimeException $e) {
-            $this->updatePollState('error', $e->getMessage());
-            throw $e;
-        }
-
-        if (empty($states)) {
-            $this->updatePollState('success');
+        // Per-endpoint file lock to prevent concurrent runs of the same endpoint
+        $lockTag = str_replace('/', '_', $this->endpoint);
+        $lockFile = sys_get_temp_dir() . '/fnt-poll-' . $lockTag . '.lock';
+        $lockFp = fopen($lockFile, 'c');
+        if ($lockFp === false || !flock($lockFp, LOCK_EX | LOCK_NB)) {
+            $msg = sprintf("[%s] Poll skipped: another %s poll is already running\n", gmdate('Y-m-d H:i:s'), $this->endpoint);
+            fwrite(STDERR, $msg);
+            if ($lockFp !== false) {
+                fclose($lockFp);
+            }
             return array_merge($this->counters, ['states_found' => 0]);
         }
 
-        // Process each state
-        foreach ($states as $state) {
-            $this->processState($state);
+        try {
+            // Update poll timestamp
+            $this->updatePollState('polling');
+
+            try {
+                $states = $this->fetchStates();
+            } catch (\RuntimeException $e) {
+                $this->updatePollState('error', $e->getMessage());
+                throw $e;
+            }
+
+            if (empty($states)) {
+                $this->updatePollState('success');
+                return array_merge($this->counters, ['states_found' => 0]);
+            }
+
+            // Process each state
+            foreach ($states as $state) {
+                $this->processState($state);
+            }
+
+            $this->updatePollState('success');
+
+            return array_merge($this->counters, ['states_found' => count($states)]);
+        } finally {
+            flock($lockFp, LOCK_UN);
+            fclose($lockFp);
         }
-
-        $this->updatePollState('success');
-
-        return array_merge($this->counters, ['states_found' => count($states)]);
     }
 
     /**
@@ -544,7 +565,7 @@ class OpenSkyPoller
         );
 
         $stmt->execute([
-            'source' => 'opensky',
+            'source' => $this->source,
             'last_poll' => $now,
             'last_success' => $status === 'success' ? $now : null,
             'error' => $error,
